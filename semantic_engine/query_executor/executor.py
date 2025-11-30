@@ -177,6 +177,10 @@ class QueryExecutor:
         # Get node label (use name or fallback to id)
         node_label = node.name or node.id
         
+        # Special pattern: PARAMETER matches any function parameter
+        if pattern == 'PARAMETER' and node.type == NodeType.PARAMETER:
+            return True
+        
         # Check node label
         if pattern.lower() in node_label.lower():
             return True

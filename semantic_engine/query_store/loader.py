@@ -1,9 +1,9 @@
 """
 Query Store - Static Security Rule Management
-Loads and manages predefined semantic security queries from YAML configuration.
+Loads and manages predefined semantic security queries from JSON configuration.
 Replaces LLM-based query generation with static, maintainable rules.
 """
-import yaml
+import json
 import os
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -49,12 +49,12 @@ class QueryStore:
         Initialize Query Store.
         
         Args:
-            queries_path: Path to queries.yaml file. If None, uses default location.
+            queries_path: Path to queries.json file. If None, uses default location.
         """
         if queries_path is None:
-            # Default to queries/queries.yaml in project root
+            # Default to queries/queries.json in project root
             project_root = Path(__file__).parent.parent.parent
-            queries_path = project_root / "queries" / "queries.yaml"
+            queries_path = project_root / "queries" / "queries.json"
         
         self.queries_path = Path(queries_path)
         self.queries: Dict[str, QueryRule] = {}
@@ -65,14 +65,14 @@ class QueryStore:
         logger.info(f"QueryStore initialized with {len(self.queries)} rules from {self.queries_path}")
     
     def load_queries(self) -> None:
-        """Load security queries from YAML file."""
+        """Load security queries from JSON file."""
         try:
             if not self.queries_path.exists():
                 logger.error(f"Queries file not found: {self.queries_path}")
                 return
             
-            with open(self.queries_path, 'r') as f:
-                data = yaml.safe_load(f)
+            with open(self.queries_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
             
             if not data:
                 logger.warning("Empty queries file")
@@ -81,12 +81,9 @@ class QueryStore:
             # Parse each rule
             self.queries = {}
             for rule_id, rule_data in data.items():
-                # Skip comments
-                if rule_id.startswith('#'):
-                    continue
-                
-                # Add rule_id to data
-                rule_data['rule_id'] = rule_id
+                # Add rule_id to data if not present
+                if 'rule_id' not in rule_data:
+                    rule_data['rule_id'] = rule_id
                 
                 try:
                     query_rule = QueryRule(**rule_data)

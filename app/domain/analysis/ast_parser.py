@@ -243,6 +243,85 @@ class ASTParser:
             # Expression statement - skip wrapper, parse value
             return self._parse_ast_node(node.value, parent_id, filename)
         
+        elif isinstance(node, ast.If):
+            # If statement - parse condition and both branches
+            nodes = []
+            edges = []
+            
+            # Parse condition
+            cond_nodes, cond_edges = self._parse_ast_node(node.test, parent_id, filename)
+            nodes.extend(cond_nodes)
+            edges.extend(cond_edges)
+            
+            # Parse if body
+            for stmt in node.body:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+            
+            # Parse else body
+            for stmt in node.orelse:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+        
+        elif isinstance(node, ast.Try):
+            # Try-except block - parse all parts
+            nodes = []
+            edges = []
+            
+            # Parse try body
+            for stmt in node.body:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+            
+            # Parse except handlers
+            for handler in node.handlers:
+                for stmt in handler.body:
+                    stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                    nodes.extend(stmt_nodes)
+                    edges.extend(stmt_edges)
+            
+            # Parse else body
+            for stmt in node.orelse:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+            
+            # Parse finally body
+            for stmt in node.finalbody:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+        
+        elif isinstance(node, (ast.For, ast.While)):
+            # Loop statements - parse body
+            nodes = []
+            edges = []
+            
+            # Parse loop body
+            for stmt in node.body:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+            
+            # Parse else body (for loops can have else)
+            for stmt in node.orelse:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+        
+        elif isinstance(node, ast.With):
+            # With statement - parse body
+            nodes = []
+            edges = []
+            
+            for stmt in node.body:
+                stmt_nodes, stmt_edges = self._parse_ast_node(stmt, parent_id, filename)
+                nodes.extend(stmt_nodes)
+                edges.extend(stmt_edges)
+        
         elif isinstance(node, (ast.Str, ast.Constant)):
             # String/constant - create node but don't recurse
             const_node = GraphNode(
