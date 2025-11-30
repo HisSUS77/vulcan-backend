@@ -1,0 +1,389 @@
+# Semantic Security Query Rules for CPG-Based Vulnerability Detection
+# OWASP Top 10 Coverage + Additional Security Patterns
+
+SQL_INJECTION:
+  name: "SQL Injection"
+  owasp: "A03"
+  cwe: "CWE-89"
+  description: "User input flows to SQL execution without parameterization"
+  severity: critical
+  sources:
+    # Python
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - request.data
+    - input
+    - sys.argv
+    # JavaScript/TypeScript
+    - req.query
+    - req.body
+    - req.params
+    - req.headers
+    - process.argv
+  sinks:
+    # Python
+    - execute
+    - executemany
+    - raw
+    - cursor.execute
+    - connection.execute
+    - db.execute
+    - Model.objects.raw
+    # JavaScript/TypeScript
+    - query
+    - execute
+    - sequelize.query
+    - knex.raw
+    - db.query
+    - connection.query
+  patterns:
+    - "DFG_FLOW"
+    - "TAINT_FLOW"
+  sanitizers:
+    - parameterized
+    - escape
+    - quote
+    - prepare
+  confidence: high
+
+COMMAND_INJECTION:
+  name: "OS Command Injection"
+  owasp: "A03"
+  cwe: "CWE-78"
+  description: "User input flows to system command execution"
+  severity: critical
+  sources:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - request.json
+    - req.query
+    - req.body
+    - req.params
+    - input
+    - sys.argv
+    - process.argv
+  sinks:
+    # Python
+    - os.system
+    - subprocess.call
+    - subprocess.Popen
+    - subprocess.run
+    - os.popen
+    - eval
+    - exec
+    # JavaScript
+    - child_process.exec
+    - child_process.spawn
+    - child_process.execSync
+    - eval
+  patterns:
+    - "DFG_FLOW"
+    - "TAINT_FLOW"
+  sanitizers:
+    - shlex.quote
+    - shell=False
+    - allowlist
+  confidence: high
+
+XSS:
+  name: "Cross-Site Scripting"
+  owasp: "A03"
+  cwe: "CWE-79"
+  description: "User input rendered in HTML without escaping"
+  severity: high
+  sources:
+    - request.GET
+    - request.POST
+    - request.args
+    - req.query
+    - req.body
+    - req.params
+  sinks:
+    # Python
+    - render_template_string
+    - Markup
+    - safe
+    - mark_safe
+    # JavaScript
+    - innerHTML
+    - outerHTML
+    - document.write
+    - eval
+    - dangerouslySetInnerHTML
+  patterns:
+    - "DFG_FLOW"
+  sanitizers:
+    - escape
+    - html.escape
+    - DOMPurify
+    - sanitize
+  confidence: medium
+
+PATH_TRAVERSAL:
+  name: "Path Traversal"
+  owasp: "A01"
+  cwe: "CWE-22"
+  description: "User input used in file path without validation"
+  severity: high
+  sources:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - req.query
+    - req.body
+    - req.params
+  sinks:
+    # Python
+    - open
+    - os.path.join
+    - pathlib.Path
+    - shutil.copy
+    - shutil.move
+    # JavaScript
+    - fs.readFile
+    - fs.writeFile
+    - fs.readFileSync
+    - fs.writeFileSync
+    - path.join
+  patterns:
+    - "DFG_FLOW"
+  sanitizers:
+    - os.path.abspath
+    - os.path.realpath
+    - path.resolve
+    - allowlist
+  confidence: high
+
+SSRF:
+  name: "Server-Side Request Forgery"
+  owasp: "A10"
+  cwe: "CWE-918"
+  description: "User-controlled URL used in server-side requests"
+  severity: high
+  sources:
+    - request.GET
+    - request.POST
+    - request.args
+    - request.form
+    - req.query
+    - req.body
+  sinks:
+    # Python
+    - requests.get
+    - requests.post
+    - urllib.request.urlopen
+    - httpx.get
+    - httpx.post
+    # JavaScript
+    - fetch
+    - axios.get
+    - axios.post
+    - http.get
+    - https.get
+  patterns:
+    - "DFG_FLOW"
+  sanitizers:
+    - allowlist
+    - urlparse
+    - URL
+  confidence: medium
+
+BROKEN_ACCESS_CONTROL:
+  name: "Broken Access Control"
+  owasp: "A01"
+  cwe: "CWE-639"
+  description: "Missing or inadequate authorization checks"
+  severity: high
+  sources:
+    - request.GET
+    - request.POST
+    - req.params
+    - req.query
+  sinks:
+    - Model.objects.get
+    - Model.objects.filter
+    - db.query
+    - findById
+    - findOne
+  patterns:
+    - "DFG_FLOW AND NOT exists(auth_check)"
+  required_guards:
+    - "@login_required"
+    - "@permission_required"
+    - "check_permission"
+    - "authorize"
+    - "isAuthenticated"
+  confidence: medium
+
+INSECURE_DESERIALIZATION:
+  name: "Insecure Deserialization"
+  owasp: "A08"
+  cwe: "CWE-502"
+  description: "Untrusted data deserialized without validation"
+  severity: critical
+  sources:
+    - request.GET
+    - request.POST
+    - request.data
+    - req.body
+    - req.query
+  sinks:
+    # Python
+    - pickle.loads
+    - pickle.load
+    - yaml.load
+    - eval
+    # JavaScript
+    - JSON.parse
+    - eval
+    - Function
+  patterns:
+    - "DFG_FLOW"
+  sanitizers:
+    - yaml.safe_load
+    - json.loads
+  confidence: high
+
+WEAK_CRYPTO:
+  name: "Weak Cryptography"
+  owasp: "A02"
+  cwe: "CWE-327"
+  description: "Use of weak cryptographic algorithms"
+  severity: medium
+  patterns:
+    - "CALL(md5)"
+    - "CALL(sha1)"
+    - "CALL(DES)"
+    - "CALL(RC4)"
+  blacklisted_algos:
+    - md5
+    - sha1
+    - DES
+    - RC4
+    - ECB
+  confidence: high
+
+HARDCODED_SECRETS:
+  name: "Hardcoded Secrets"
+  owasp: "A07"
+  cwe: "CWE-798"
+  description: "Secrets hardcoded in source code"
+  severity: critical
+  patterns:
+    - "LITERAL(password|secret|key|token|api_key) AND ASSIGNMENT"
+  regex_patterns:
+    - "password\\s*=\\s*['\"]\\w+"
+    - "api_key\\s*=\\s*['\"]\\w+"
+    - "secret_key\\s*=\\s*['\"]\\w+"
+    - "AWS_SECRET|GITHUB_TOKEN|PRIVATE_KEY"
+  confidence: high
+
+DEBUG_MODE_ENABLED:
+  name: "Debug Mode in Production"
+  owasp: "A05"
+  cwe: "CWE-489"
+  description: "Debug mode enabled exposing sensitive information"
+  severity: medium
+  patterns:
+    - "ASSIGNMENT(debug) AND LITERAL(True)"
+    - "ASSIGNMENT(DEBUG) AND LITERAL(true)"
+  dangerous_settings:
+    - "DEBUG = True"
+    - "debug: true"
+    - "app.debug = True"
+  confidence: high
+
+LDAP_INJECTION:
+  name: "LDAP Injection"
+  owasp: "A03"
+  cwe: "CWE-90"
+  description: "User input in LDAP queries"
+  severity: high
+  sources:
+    - request.GET
+    - request.POST
+    - req.query
+    - req.body
+  sinks:
+    - ldap.search
+    - ldap.bind
+    - search_s
+  patterns:
+    - "DFG_FLOW"
+  confidence: medium
+
+XML_INJECTION:
+  name: "XML External Entity (XXE)"
+  owasp: "A05"
+  cwe: "CWE-611"
+  description: "Unsafe XML parsing with external entities enabled"
+  severity: high
+  sources:
+    - request.data
+    - request.body
+    - req.body
+  sinks:
+    - xml.etree.ElementTree.parse
+    - lxml.etree.parse
+    - XMLParser
+  patterns:
+    - "DFG_FLOW"
+  required_settings:
+    - "resolve_entities=False"
+    - "no_network=True"
+  confidence: medium
+
+MASS_ASSIGNMENT:
+  name: "Mass Assignment"
+  owasp: "A04"
+  cwe: "CWE-915"
+  description: "Unrestricted object property assignment from user input"
+  severity: medium
+  sources:
+    - request.json
+    - request.form
+    - req.body
+  sinks:
+    - Model.objects.create
+    - Model.objects.update
+    - save
+    - update
+  patterns:
+    - "DFG_FLOW AND NOT exists(field_filter)"
+  confidence: low
+
+CORS_MISCONFIGURATION:
+  name: "CORS Misconfiguration"
+  owasp: "A05"
+  cwe: "CWE-942"
+  description: "Overly permissive CORS policy"
+  severity: medium
+  patterns:
+    - "ASSIGNMENT(Access-Control-Allow-Origin) AND LITERAL(*)"
+    - "CORS(origins=['*'])"
+  dangerous_values:
+    - "Access-Control-Allow-Origin: *"
+    - "origins=['*']"
+  confidence: high
+
+TIMING_ATTACK:
+  name: "Timing Attack Vulnerability"
+  owasp: "A02"
+  cwe: "CWE-208"
+  description: "Non-constant-time comparison of secrets"
+  severity: low
+  patterns:
+    - "IF(password == input) OR IF(token == input)"
+  dangerous_comparisons:
+    - "=="
+    - "!="
+  required_functions:
+    - "hmac.compare_digest"
+    - "secrets.compare_digest"
+  confidence: medium

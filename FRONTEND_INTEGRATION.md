@@ -190,8 +190,108 @@ const poll = (scanId: string, onTick: (s: any) => void) => {
 - [ ] Implement login → store token → call `/auth/me` to hydrate user.
 - [ ] Guard protected routes (redirect to login on 401).
 - [ ] Wire UI calls to endpoints above (repositories, scans, graphs, patches, reports, notifications).
+- [ ] Integrate semantic analysis endpoints for advanced vulnerability detection.
+
+## Advanced Analysis (NEW)
+
+The backend now includes semantic graph-based taint analysis for detecting security vulnerabilities in source code.
+
+### Analyze Code
+
+**POST /api/v1/analysis/analyze**
+
+Analyzes source code for security vulnerabilities using semantic graph analysis (AST + CFG + DFG + taint tracking + LLM reasoning).
+
+```ts
+interface AnalyzeRequest {
+  code: string;
+  language: "python" | "javascript" | "typescript";
+  filename?: string;
+}
+
+interface AnalyzeResponse {
+  graph: {
+    nodes: Array<{
+      id: string;
+      type: string;
+      name?: string;
+      file: string;
+      line: number;
+    }>;
+    edges: Array<{
+      from: string;
+      to: string;
+      type: string;
+    }>;
+  };
+  vulnerabilities: Array<{
+    source: { id: string; name: string; line: number };
+    sink: { id: string; name: string; line: number };
+    severity: "low" | "medium" | "high" | "critical";
+    flow_path: Array<{ id: string; name: string; line: number }>;
+    code_snippet: string;
+    explanation: string;
+    recommended_fix: string;
+    patch: string;
+  }>;
+}
+```
+
+Example request:
+```ts
+const result = await api.post('/analysis/analyze', {
+  code: `
+def get_user(user_id):
+    query = "SELECT * FROM users WHERE id = " + user_id
+    cursor.execute(query)
+    return cursor.fetchone()
+  `,
+  language: 'python',
+  filename: 'user_service.py'
+});
+
+// Result contains graph + detected SQL injection vulnerability
+console.log(result.data.vulnerabilities[0]);
+// {
+//   severity: "critical",
+//   explanation: "SQL Injection detected...",
+//   recommended_fix: "Use parameterized queries...",
+//   patch: "cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))"
+// }
+```
+
+### Build Semantic Graph
+
+**POST /api/v1/analysis/graph**
+
+Builds and returns just the semantic graph without running taint analysis (useful for visualization).
+
+```ts
+const graphResult = await api.post('/analysis/graph', {
+  code: sourceCode,
+  language: 'python',
+  filename: 'app.py'
+});
+
+// Returns just the graph structure
+console.log(graphResult.data.nodes.length);
+console.log(graphResult.data.edges.length);
+```
+
+### List Findings
+
+**GET /api/v1/analysis/findings**
+
+Lists recent vulnerability findings (currently returns placeholder, can be enhanced to persist findings in DB).
+
+```ts
+const findings = await api.get('/analysis/findings');
+```
 
 ## Notes
 - This backend ships with mock engines so all endpoints work out of the box.
 - Default DB is SQLite; no frontend change required.
 - OAuth routes return `501` placeholders.
+- **NEW**: Semantic analysis currently supports Python with plans for JavaScript/TypeScript.
+- **NEW**: Detects SQL injection, command injection, XSS, path traversal via taint tracking.
+- **NEW**: Provides automated patch suggestions for detected vulnerabilities.

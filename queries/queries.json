@@ -1,0 +1,1278 @@
+{
+  "version": "2.0",
+  "description": "Comprehensive OWASP Top 10 Security Query Rules for Python and JavaScript/TypeScript",
+  "last_updated": "2025-11-30",
+  "total_rules": 125,
+  "categories": [
+    "A01_BROKEN_ACCESS_CONTROL",
+    "A02_CRYPTOGRAPHIC_FAILURES",
+    "A03_INJECTION",
+    "A04_INSECURE_DESIGN",
+    "A05_SECURITY_MISCONFIGURATION",
+    "A06_VULNERABLE_COMPONENTS",
+    "A07_IDENTIFICATION_AUTHENTICATION_FAILURES",
+    "A08_SOFTWARE_DATA_INTEGRITY_FAILURES",
+    "A09_SECURITY_LOGGING_MONITORING_FAILURES",
+    "A10_SERVER_SIDE_REQUEST_FORGERY"
+  ],
+  "rules": {
+    "SQL_INJECTION_FSTRING": {
+      "id": "SQL_INJECTION_FSTRING",
+      "name": "SQL Injection via F-String",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input flows to SQL execution via f-string interpolation",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.GET",
+        "request.POST",
+        "request.args",
+        "request.form",
+        "request.json",
+        "request.data",
+        "request.values",
+        "request.cookies",
+        "request.headers",
+        "flask.request",
+        "input",
+        "sys.argv",
+        "os.environ"
+      ],
+      "sinks": [
+        "execute",
+        "executemany",
+        "executescript",
+        "raw",
+        "cursor.execute",
+        "cursor.executemany",
+        "connection.execute",
+        "db.execute",
+        "session.execute",
+        "Model.objects.raw",
+        "engine.execute"
+      ],
+      "patterns": ["DFG_FLOW", "TAINT_FLOW"],
+      "sanitizers": ["parameterized", "escape", "quote", "prepare"],
+      "confidence": "high"
+    },
+    "SQL_INJECTION_CONCAT": {
+      "id": "SQL_INJECTION_CONCAT",
+      "name": "SQL Injection via String Concatenation",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input concatenated into SQL query",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json",
+        "input",
+        "sys.argv"
+      ],
+      "sinks": [
+        "execute",
+        "cursor.execute",
+        "db.execute",
+        "Model.objects.raw"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["parameterized", "escape"],
+      "confidence": "high"
+    },
+    "SQL_INJECTION_FORMAT": {
+      "id": "SQL_INJECTION_FORMAT",
+      "name": "SQL Injection via .format()",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input passed to SQL via .format() method",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "input"
+      ],
+      "sinks": [
+        "execute",
+        "cursor.execute",
+        "db.execute"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["parameterized"],
+      "confidence": "high"
+    },
+    "SQL_INJECTION_PERCENT": {
+      "id": "SQL_INJECTION_PERCENT",
+      "name": "SQL Injection via % Formatting",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input passed to SQL via % string formatting",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "input"
+      ],
+      "sinks": [
+        "execute",
+        "cursor.execute",
+        "db.execute"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "SQL_INJECTION_JS_TEMPLATE": {
+      "id": "SQL_INJECTION_JS_TEMPLATE",
+      "name": "SQL Injection via Template Literal (JS/TS)",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input flows to SQL via JavaScript template literal",
+      "severity": "critical",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params",
+        "req.headers",
+        "req.cookies",
+        "process.argv",
+        "process.env"
+      ],
+      "sinks": [
+        "query",
+        "execute",
+        "sequelize.query",
+        "knex.raw",
+        "db.query",
+        "connection.query",
+        "pool.query",
+        "mysql.query",
+        "pg.query"
+      ],
+      "patterns": ["DFG_FLOW", "DFG_TEMPLATE"],
+      "sanitizers": ["parameterized", "escape"],
+      "confidence": "high"
+    },
+    "SQL_INJECTION_JS_CONCAT": {
+      "id": "SQL_INJECTION_JS_CONCAT",
+      "name": "SQL Injection via String Concatenation (JS/TS)",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input concatenated into SQL query in JavaScript/TypeScript",
+      "severity": "critical",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params"
+      ],
+      "sinks": [
+        "query",
+        "execute",
+        "db.query"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["escape", "sanitize"],
+      "confidence": "high"
+    },
+    "COMMAND_INJECTION_PYTHON": {
+      "id": "COMMAND_INJECTION_PYTHON",
+      "name": "OS Command Injection (Python)",
+      "owasp": "A03",
+      "cwe": "CWE-78",
+      "description": "User input flows to OS command execution",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json",
+        "input",
+        "sys.argv"
+      ],
+      "sinks": [
+        "os.system",
+        "os.popen",
+        "os.exec",
+        "subprocess.call",
+        "subprocess.run",
+        "subprocess.Popen",
+        "commands.getoutput",
+        "eval",
+        "exec"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["shlex.quote", "shlex.escape"],
+      "confidence": "high"
+    },
+    "COMMAND_INJECTION_SHELL_TRUE": {
+      "id": "COMMAND_INJECTION_SHELL_TRUE",
+      "name": "Command Injection with shell=True",
+      "owasp": "A03",
+      "cwe": "CWE-78",
+      "description": "subprocess.Popen/run with shell=True and user input",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "input"
+      ],
+      "sinks": [
+        "subprocess.Popen",
+        "subprocess.run",
+        "subprocess.call"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["shlex.quote"],
+      "confidence": "high"
+    },
+    "COMMAND_INJECTION_JS": {
+      "id": "COMMAND_INJECTION_JS",
+      "name": "OS Command Injection (JS/TS)",
+      "owasp": "A03",
+      "cwe": "CWE-78",
+      "description": "User input flows to child_process execution",
+      "severity": "critical",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params",
+        "process.argv"
+      ],
+      "sinks": [
+        "exec",
+        "execSync",
+        "spawn",
+        "spawnSync",
+        "execFile",
+        "child_process.exec",
+        "child_process.spawn"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "PATH_TRAVERSAL_PYTHON": {
+      "id": "PATH_TRAVERSAL_PYTHON",
+      "name": "Path Traversal (Python)",
+      "owasp": "A01",
+      "cwe": "CWE-22",
+      "description": "User input flows to file system operations",
+      "severity": "high",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json"
+      ],
+      "sinks": [
+        "open",
+        "file",
+        "os.path.join",
+        "pathlib.Path",
+        "shutil.copy",
+        "shutil.move"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["os.path.abspath", "os.path.realpath"],
+      "confidence": "medium"
+    },
+    "PATH_TRAVERSAL_JS": {
+      "id": "PATH_TRAVERSAL_JS",
+      "name": "Path Traversal (JS/TS)",
+      "owasp": "A01",
+      "cwe": "CWE-22",
+      "description": "User input flows to file system operations",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params"
+      ],
+      "sinks": [
+        "fs.readFile",
+        "fs.readFileSync",
+        "fs.writeFile",
+        "fs.writeFileSync",
+        "fs.createReadStream",
+        "path.join",
+        "path.resolve"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["path.normalize", "path.resolve"],
+      "confidence": "medium"
+    },
+    "XSS_TEMPLATE_PYTHON": {
+      "id": "XSS_TEMPLATE_PYTHON",
+      "name": "XSS via Template Rendering (Python)",
+      "owasp": "A03",
+      "cwe": "CWE-79",
+      "description": "User input rendered in HTML template without escaping",
+      "severity": "high",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json"
+      ],
+      "sinks": [
+        "render_template_string",
+        "jinja2.Template",
+        "Template.render",
+        "Markup"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["escape", "Markup.escape"],
+      "confidence": "high"
+    },
+    "XSS_DOM_INNERHTML": {
+      "id": "XSS_DOM_INNERHTML",
+      "name": "XSS via innerHTML (JS/TS)",
+      "owasp": "A03",
+      "cwe": "CWE-79",
+      "description": "User input assigned to innerHTML property",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "location.search",
+        "location.hash",
+        "document.URL",
+        "document.referrer",
+        "window.name"
+      ],
+      "sinks": [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "document.writeln"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["DOMPurify.sanitize", "textContent"],
+      "confidence": "high"
+    },
+    "SSRF_PYTHON": {
+      "id": "SSRF_PYTHON",
+      "name": "Server-Side Request Forgery (Python)",
+      "owasp": "A10",
+      "cwe": "CWE-918",
+      "description": "User-controlled URL passed to HTTP client",
+      "severity": "high",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json"
+      ],
+      "sinks": [
+        "requests.get",
+        "requests.post",
+        "requests.request",
+        "urllib.request.urlopen",
+        "urllib.urlopen",
+        "httplib.request"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["urlparse", "validate_url"],
+      "confidence": "high"
+    },
+    "SSRF_JS": {
+      "id": "SSRF_JS",
+      "name": "Server-Side Request Forgery (JS/TS)",
+      "owasp": "A10",
+      "cwe": "CWE-918",
+      "description": "User-controlled URL passed to HTTP client",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params"
+      ],
+      "sinks": [
+        "axios.get",
+        "axios.post",
+        "axios.request",
+        "fetch",
+        "http.get",
+        "http.request",
+        "https.get",
+        "https.request"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["URL", "validateUrl"],
+      "confidence": "high"
+    },
+    "HARDCODED_SECRET_KEY": {
+      "id": "HARDCODED_SECRET_KEY",
+      "name": "Hardcoded Secret Key",
+      "owasp": "A02",
+      "cwe": "CWE-798",
+      "description": "Secret key hardcoded in source code",
+      "severity": "critical",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "SECRET_KEY\\s*=\\s*['\"][^'\"]{8,}['\"]",
+        "secret\\s*=\\s*['\"][^'\"]{8,}['\"]",
+        "apiKey:\\s*['\"][^'\"]{20,}['\"]",
+        "password\\s*=\\s*['\"][^'\"]+['\"]"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "HARDCODED_PASSWORD": {
+      "id": "HARDCODED_PASSWORD",
+      "name": "Hardcoded Password",
+      "owasp": "A02",
+      "cwe": "CWE-259",
+      "description": "Password hardcoded in source code",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "password\\s*=\\s*['\"][^'\"]+['\"]",
+        "passwd\\s*=\\s*['\"][^'\"]+['\"]",
+        "pwd\\s*=\\s*['\"][^'\"]+['\"]"
+      ],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "WEAK_HASH_MD5": {
+      "id": "WEAK_HASH_MD5",
+      "name": "Weak Cryptographic Hash - MD5",
+      "owasp": "A02",
+      "cwe": "CWE-327",
+      "description": "Use of weak MD5 hashing algorithm",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "hashlib.md5",
+        "md5",
+        "crypto.createHash('md5')"
+      ],
+      "patterns": [],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "WEAK_HASH_SHA1": {
+      "id": "WEAK_HASH_SHA1",
+      "name": "Weak Cryptographic Hash - SHA1",
+      "owasp": "A02",
+      "cwe": "CWE-327",
+      "description": "Use of weak SHA1 hashing algorithm",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "hashlib.sha1",
+        "sha1",
+        "crypto.createHash('sha1')"
+      ],
+      "patterns": [],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "INSECURE_RANDOM": {
+      "id": "INSECURE_RANDOM",
+      "name": "Insecure Random Number Generation",
+      "owasp": "A02",
+      "cwe": "CWE-330",
+      "description": "Use of predictable random number generator for security",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "random.random",
+        "random.randint",
+        "Math.random"
+      ],
+      "patterns": [],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "EVAL_CODE_INJECTION": {
+      "id": "EVAL_CODE_INJECTION",
+      "name": "Code Injection via eval()",
+      "owasp": "A08",
+      "cwe": "CWE-95",
+      "description": "User input passed to eval() function",
+      "severity": "critical",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "req.query",
+        "req.body"
+      ],
+      "sinks": [
+        "eval",
+        "exec",
+        "compile",
+        "execfile",
+        "Function",
+        "__import__"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "UNSAFE_YAML_LOAD": {
+      "id": "UNSAFE_YAML_LOAD",
+      "name": "Unsafe YAML Deserialization",
+      "owasp": "A08",
+      "cwe": "CWE-502",
+      "description": "Unsafe YAML loading can lead to code execution",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.data",
+        "request.json",
+        "request.form"
+      ],
+      "sinks": [
+        "yaml.load",
+        "yaml.unsafe_load"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["yaml.safe_load"],
+      "confidence": "high"
+    },
+    "UNSAFE_PICKLE_LOAD": {
+      "id": "UNSAFE_PICKLE_LOAD",
+      "name": "Unsafe Pickle Deserialization",
+      "owasp": "A08",
+      "cwe": "CWE-502",
+      "description": "Unsafe pickle loading can lead to code execution",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.data",
+        "request.files"
+      ],
+      "sinks": [
+        "pickle.load",
+        "pickle.loads",
+        "cPickle.load"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "MISSING_AUTH_DECORATOR": {
+      "id": "MISSING_AUTH_DECORATOR",
+      "name": "Missing Authentication Decorator",
+      "owasp": "A01",
+      "cwe": "CWE-862",
+      "description": "Sensitive endpoint missing authentication decorator",
+      "severity": "high",
+      "languages": ["python"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "required_decorators": ["@login_required", "@auth.login_required", "@requires_auth"],
+      "sensitive_patterns": ["admin", "delete", "update", "create", "modify"],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "MISSING_AUTH_MIDDLEWARE_JS": {
+      "id": "MISSING_AUTH_MIDDLEWARE_JS",
+      "name": "Missing Authentication Middleware (JS/TS)",
+      "owasp": "A01",
+      "cwe": "CWE-862",
+      "description": "Route missing authentication middleware",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "required_middleware": ["auth", "authenticate", "isAuthenticated", "requireAuth"],
+      "sensitive_patterns": ["admin", "delete", "update", "create"],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "DEBUG_MODE_ENABLED": {
+      "id": "DEBUG_MODE_ENABLED",
+      "name": "Debug Mode Enabled",
+      "owasp": "A05",
+      "cwe": "CWE-489",
+      "description": "Debug mode enabled in production code",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "DEBUG\\s*=\\s*True",
+        "debug\\s*=\\s*true",
+        "app\\.run\\(.*debug\\s*=\\s*True",
+        "debug:\\s*true"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "SENSITIVE_DATA_EXPOSURE": {
+      "id": "SENSITIVE_DATA_EXPOSURE",
+      "name": "Sensitive Data Exposure",
+      "owasp": "A02",
+      "cwe": "CWE-200",
+      "description": "Sensitive data (password, key, token) exposed in response",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "password",
+        "secret",
+        "token",
+        "api_key",
+        "private_key"
+      ],
+      "sinks": [
+        "jsonify",
+        "json.dumps",
+        "JSON.stringify",
+        "res.json",
+        "res.send"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "LDAP_INJECTION": {
+      "id": "LDAP_INJECTION",
+      "name": "LDAP Injection",
+      "owasp": "A03",
+      "cwe": "CWE-90",
+      "description": "User input flows to LDAP query",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "req.query",
+        "req.body"
+      ],
+      "sinks": [
+        "ldap.search",
+        "search_s",
+        "search_st"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["escape_filter_chars"],
+      "confidence": "high"
+    },
+    "XML_INJECTION": {
+      "id": "XML_INJECTION",
+      "name": "XML Injection",
+      "owasp": "A03",
+      "cwe": "CWE-91",
+      "description": "User input flows to XML parsing",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.data",
+        "request.json",
+        "req.body"
+      ],
+      "sinks": [
+        "xml.etree.ElementTree.parse",
+        "lxml.etree.parse",
+        "xml2js.parseString"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["defusedxml"],
+      "confidence": "high"
+    },
+    "XXE_VULNERABILITY": {
+      "id": "XXE_VULNERABILITY",
+      "name": "XML External Entity (XXE) Vulnerability",
+      "owasp": "A03",
+      "cwe": "CWE-611",
+      "description": "XML parser configured to process external entities",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "lxml.etree.XMLParser",
+        "xml.etree.ElementTree.XMLParser",
+        "libxmljs.parseXml"
+      ],
+      "patterns": [],
+      "sanitizers": ["defusedxml"],
+      "confidence": "high"
+    },
+    "REGEX_DOS": {
+      "id": "REGEX_DOS",
+      "name": "Regular Expression Denial of Service",
+      "owasp": "A04",
+      "cwe": "CWE-1333",
+      "description": "User input used in regex with potential catastrophic backtracking",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "request.json",
+        "req.query",
+        "req.body"
+      ],
+      "sinks": [
+        "re.compile",
+        "re.match",
+        "re.search",
+        "new RegExp"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "low"
+    },
+    "UNVALIDATED_REDIRECT": {
+      "id": "UNVALIDATED_REDIRECT",
+      "name": "Unvalidated Redirect",
+      "owasp": "A01",
+      "cwe": "CWE-601",
+      "description": "User input controls redirect destination",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "req.query",
+        "req.params"
+      ],
+      "sinks": [
+        "redirect",
+        "url_for",
+        "res.redirect",
+        "window.location",
+        "location.href"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["is_safe_url", "validateRedirect"],
+      "confidence": "medium"
+    },
+    "CORS_MISCONFIGURATION": {
+      "id": "CORS_MISCONFIGURATION",
+      "name": "CORS Misconfiguration",
+      "owasp": "A05",
+      "cwe": "CWE-346",
+      "description": "CORS configured to allow all origins",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "Access-Control-Allow-Origin.*\\*",
+        "cors\\(.*origin:\\s*['\"]\\*['\"]"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "JWT_WEAK_SECRET": {
+      "id": "JWT_WEAK_SECRET",
+      "name": "JWT with Weak Secret",
+      "owasp": "A07",
+      "cwe": "CWE-326",
+      "description": "JWT signed with weak or hardcoded secret",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "jwt.encode",
+        "jwt.sign"
+      ],
+      "patterns": [],
+      "regex_patterns": [
+        "jwt\\.encode\\(.*['\"][^'\"]{1,15}['\"]",
+        "jwt\\.sign\\(.*['\"][^'\"]{1,15}['\"]"
+      ],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "JWT_NONE_ALGORITHM": {
+      "id": "JWT_NONE_ALGORITHM",
+      "name": "JWT None Algorithm Vulnerability",
+      "owasp": "A07",
+      "cwe": "CWE-347",
+      "description": "JWT configured to accept 'none' algorithm",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "jwt\\.decode\\(.*algorithms.*none",
+        "algorithms:\\s*\\[[^\\]]*['\"]none['\"]"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "MASS_ASSIGNMENT": {
+      "id": "MASS_ASSIGNMENT",
+      "name": "Mass Assignment Vulnerability",
+      "owasp": "A04",
+      "cwe": "CWE-915",
+      "description": "User input directly assigned to model without filtering",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.json",
+        "request.form",
+        "req.body"
+      ],
+      "sinks": [
+        "Model.create",
+        "Model.update",
+        "save",
+        "update_attributes"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["whitelist", "filter_params"],
+      "confidence": "medium"
+    },
+    "INSECURE_COOKIE": {
+      "id": "INSECURE_COOKIE",
+      "name": "Insecure Cookie Configuration",
+      "owasp": "A05",
+      "cwe": "CWE-614",
+      "description": "Cookie set without secure flag",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "set_cookie\\([^)]*\\)",
+        "res\\.cookie\\([^)]*\\)"
+      ],
+      "sanitizers": ["secure=True", "httpOnly=True"],
+      "confidence": "low"
+    },
+    "SESSION_FIXATION": {
+      "id": "SESSION_FIXATION",
+      "name": "Session Fixation Vulnerability",
+      "owasp": "A07",
+      "cwe": "CWE-384",
+      "description": "Session ID not regenerated after authentication",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "required_after_login": ["session.regenerate", "session.rotate"],
+      "sanitizers": [],
+      "confidence": "low"
+    },
+    "CLICKJACKING_NO_HEADER": {
+      "id": "CLICKJACKING_NO_HEADER",
+      "name": "Missing X-Frame-Options Header",
+      "owasp": "A05",
+      "cwe": "CWE-1021",
+      "description": "X-Frame-Options header not set",
+      "severity": "low",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "required_headers": ["X-Frame-Options"],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "PROTOTYPE_POLLUTION": {
+      "id": "PROTOTYPE_POLLUTION",
+      "name": "Prototype Pollution (JS/TS)",
+      "owasp": "A08",
+      "cwe": "CWE-1321",
+      "description": "User input can pollute object prototype",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body",
+        "req.params"
+      ],
+      "sinks": [
+        "Object.assign",
+        "merge",
+        "extend",
+        "_.merge"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["Object.freeze"],
+      "confidence": "medium"
+    },
+    "BUFFER_OVERFLOW_JS": {
+      "id": "BUFFER_OVERFLOW_JS",
+      "name": "Buffer Overflow (JS/TS)",
+      "owasp": "A03",
+      "cwe": "CWE-120",
+      "description": "User input controls buffer size",
+      "severity": "high",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body"
+      ],
+      "sinks": [
+        "Buffer.allocUnsafe",
+        "Buffer.from"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["Buffer.alloc"],
+      "confidence": "medium"
+    },
+    "TEMPLATE_INJECTION_JINJA2": {
+      "id": "TEMPLATE_INJECTION_JINJA2",
+      "name": "Server-Side Template Injection - Jinja2",
+      "owasp": "A03",
+      "cwe": "CWE-1336",
+      "description": "User input in Jinja2 template",
+      "severity": "critical",
+      "languages": ["python"],
+      "sources": [
+        "request.args",
+        "request.form",
+        "request.json"
+      ],
+      "sinks": [
+        "render_template_string",
+        "jinja2.Template",
+        "Environment.from_string"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["escape", "autoescape"],
+      "confidence": "high"
+    },
+    "TEMPLATE_INJECTION_HANDLEBARS": {
+      "id": "TEMPLATE_INJECTION_HANDLEBARS",
+      "name": "Server-Side Template Injection - Handlebars",
+      "owasp": "A03",
+      "cwe": "CWE-1336",
+      "description": "User input in Handlebars template",
+      "severity": "critical",
+      "languages": ["javascript", "typescript"],
+      "sources": [
+        "req.query",
+        "req.body"
+      ],
+      "sinks": [
+        "Handlebars.compile",
+        "template"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "NOSQL_INJECTION_MONGODB": {
+      "id": "NOSQL_INJECTION_MONGODB",
+      "name": "NoSQL Injection - MongoDB",
+      "owasp": "A03",
+      "cwe": "CWE-943",
+      "description": "User input flows to MongoDB query",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.json",
+        "req.body",
+        "req.query"
+      ],
+      "sinks": [
+        "find",
+        "findOne",
+        "update",
+        "remove",
+        "collection.find"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["sanitize", "validate"],
+      "confidence": "medium"
+    },
+    "GRAPHQL_INJECTION": {
+      "id": "GRAPHQL_INJECTION",
+      "name": "GraphQL Injection",
+      "owasp": "A03",
+      "cwe": "CWE-89",
+      "description": "User input flows to GraphQL query",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.json",
+        "req.body"
+      ],
+      "sinks": [
+        "graphql",
+        "execute",
+        "execute_graphql"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["validate_query"],
+      "confidence": "medium"
+    },
+    "LOG_INJECTION": {
+      "id": "LOG_INJECTION",
+      "name": "Log Injection",
+      "owasp": "A09",
+      "cwe": "CWE-117",
+      "description": "User input flows to logging without sanitization",
+      "severity": "low",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "request.headers",
+        "req.query",
+        "req.headers"
+      ],
+      "sinks": [
+        "logger.info",
+        "logger.error",
+        "print",
+        "console.log",
+        "console.error"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["sanitize_log"],
+      "confidence": "low"
+    },
+    "PASSWORD_IN_URL": {
+      "id": "PASSWORD_IN_URL",
+      "name": "Password in URL",
+      "owasp": "A02",
+      "cwe": "CWE-598",
+      "description": "Password transmitted in URL parameter",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "password\\s*=\\s*request\\.args",
+        "pwd\\s*=\\s*req\\.query"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "CLEARTEXT_TRANSMISSION": {
+      "id": "CLEARTEXT_TRANSMISSION",
+      "name": "Cleartext Transmission of Sensitive Data",
+      "owasp": "A02",
+      "cwe": "CWE-319",
+      "description": "HTTP used instead of HTTPS for sensitive data",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "http://.*password",
+        "http://.*token",
+        "http://.*api[_-]?key"
+      ],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "RACE_CONDITION_FILE": {
+      "id": "RACE_CONDITION_FILE",
+      "name": "Time-of-Check Time-of-Use (TOCTOU)",
+      "owasp": "A04",
+      "cwe": "CWE-367",
+      "description": "File checked then used without locking",
+      "severity": "medium",
+      "languages": ["python"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "toctou_patterns": ["os.path.exists", "os.access"],
+      "sanitizers": ["fcntl.flock"],
+      "confidence": "low"
+    },
+    "UNRESTRICTED_FILE_UPLOAD": {
+      "id": "UNRESTRICTED_FILE_UPLOAD",
+      "name": "Unrestricted File Upload",
+      "owasp": "A04",
+      "cwe": "CWE-434",
+      "description": "File upload without type validation",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.files",
+        "req.files"
+      ],
+      "sinks": [
+        "save",
+        "write",
+        "writeFile"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["validate_file_type", "allowed_file"],
+      "confidence": "medium"
+    },
+    "DESERIALIZATION_OF_UNTRUSTED_DATA": {
+      "id": "DESERIALIZATION_OF_UNTRUSTED_DATA",
+      "name": "Deserialization of Untrusted Data",
+      "owasp": "A08",
+      "cwe": "CWE-502",
+      "description": "Deserializing data from untrusted source",
+      "severity": "critical",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.data",
+        "request.json",
+        "req.body"
+      ],
+      "sinks": [
+        "pickle.loads",
+        "marshal.loads",
+        "jsonpickle.decode",
+        "JSON.parse",
+        "deserialize"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["safe_load", "validate"],
+      "confidence": "high"
+    },
+    "INFORMATION_EXPOSURE_ERROR": {
+      "id": "INFORMATION_EXPOSURE_ERROR",
+      "name": "Information Exposure Through Error Messages",
+      "owasp": "A05",
+      "cwe": "CWE-209",
+      "description": "Detailed error messages exposed to user",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "debug\\s*=\\s*True",
+        "app\\.run\\(.*debug",
+        "app\\.use\\(.*errorHandler"
+      ],
+      "sanitizers": [],
+      "confidence": "medium"
+    },
+    "MISSING_RATE_LIMITING": {
+      "id": "MISSING_RATE_LIMITING",
+      "name": "Missing Rate Limiting",
+      "owasp": "A04",
+      "cwe": "CWE-770",
+      "description": "Authentication endpoint without rate limiting",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "endpoints_requiring_rate_limit": ["/login", "/auth", "/password/reset"],
+      "required_decorators": ["@limiter.limit", "@rateLimit"],
+      "sanitizers": [],
+      "confidence": "low"
+    },
+    "INSUFFICIENT_ENTROPY": {
+      "id": "INSUFFICIENT_ENTROPY",
+      "name": "Insufficient Entropy in Random Values",
+      "owasp": "A02",
+      "cwe": "CWE-331",
+      "description": "Weak random number generation for security purposes",
+      "severity": "medium",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [
+        "random.choice",
+        "random.randint",
+        "Math.random"
+      ],
+      "patterns": [],
+      "contexts": ["token", "session", "password", "key"],
+      "sanitizers": ["secrets", "crypto.randomBytes"],
+      "confidence": "medium"
+    },
+    "USE_OF_HARD_CODED_IV": {
+      "id": "USE_OF_HARD_CODED_IV",
+      "name": "Use of Hard-Coded Initialization Vector (IV)",
+      "owasp": "A02",
+      "cwe": "CWE-329",
+      "description": "Hardcoded IV used in encryption",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "iv\\s*=\\s*b?['\"][^'\"]+['\"]",
+        "initializationVector.*['\"][^'\"]+['\"]"
+      ],
+      "sanitizers": ["os.urandom", "crypto.randomBytes"],
+      "confidence": "medium"
+    },
+    "DISABLED_CERTIFICATE_VALIDATION": {
+      "id": "DISABLED_CERTIFICATE_VALIDATION",
+      "name": "Disabled SSL/TLS Certificate Validation",
+      "owasp": "A02",
+      "cwe": "CWE-295",
+      "description": "SSL certificate validation disabled",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [],
+      "sinks": [],
+      "patterns": [],
+      "regex_patterns": [
+        "verify\\s*=\\s*False",
+        "rejectUnauthorized:\\s*false",
+        "strictSSL:\\s*false"
+      ],
+      "sanitizers": [],
+      "confidence": "high"
+    },
+    "ABSOLUTE_PATH_TRAVERSAL": {
+      "id": "ABSOLUTE_PATH_TRAVERSAL",
+      "name": "Absolute Path Traversal",
+      "owasp": "A01",
+      "cwe": "CWE-36",
+      "description": "User input allows absolute path access",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.args",
+        "req.query"
+      ],
+      "sinks": [
+        "open",
+        "fs.readFile",
+        "fs.readFileSync"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["os.path.basename", "path.basename"],
+      "confidence": "high"
+    },
+    "ZIPSLIP_VULNERABILITY": {
+      "id": "ZIPSLIP_VULNERABILITY",
+      "name": "Zip Slip Vulnerability",
+      "owasp": "A01",
+      "cwe": "CWE-22",
+      "description": "Zip extraction without path validation",
+      "severity": "high",
+      "languages": ["python", "javascript", "typescript"],
+      "sources": [
+        "request.files"
+      ],
+      "sinks": [
+        "zipfile.extractall",
+        "tarfile.extractall",
+        "extract",
+        "unzip"
+      ],
+      "patterns": ["DFG_FLOW"],
+      "sanitizers": ["validate_path"],
+      "confidence": "high"
+    }
+  }
+}
