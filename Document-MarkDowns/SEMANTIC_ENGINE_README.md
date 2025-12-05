@@ -5,7 +5,7 @@ Production-grade vulnerability detection engine using **Unified Code Property Gr
 ## 🚀 Key Features
 
 ✅ **Unified Code Property Graph**: AST + CFG + DFG in one graph structure  
-✅ **Static Query Rules**: 15 OWASP Top 10 security patterns (YAML-based)  
+✅ **Static Query Rules**: 15 OWASP Top 10 security patterns (JSON-based)  
 ✅ **AI-Powered Classification**: LLM validates findings & reduces false positives  
 ✅ **Multi-Language Support**: Python (with JS/TS foundation)  
 ✅ **Production Ready**: Guardrails, timeouts, cycle detection, error handling  

@@ -1,0 +1,16 @@
+﻿# Environment variables
+.env
+
+# Python cache and metadata
+__pycache__/
+*.pyc
+*.cpython-313.pyc
+
+# Local database
+vulcan.db
+
+# OS generated files
+.DS_Store
+
+# VS Code settings (optional, keeps workspace settings local)
+.vscode/
