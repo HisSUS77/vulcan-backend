@@ -24,6 +24,9 @@ class NodeType(str, Enum):
     WHILE_STATEMENT = "WhileStatement"
     TRY_STATEMENT = "TryStatement"
     EXCEPT_HANDLER = "ExceptHandler"
+    THROW_STATEMENT = "ThrowStatement"
+    BREAK_STATEMENT = "BreakStatement"
+    CONTINUE_STATEMENT = "ContinueStatement"
     
     # Expressions
     CALL_EXPRESSION = "CallExpression"
@@ -39,7 +42,9 @@ class NodeType(str, Enum):
     STRING_PERCENT = "StringPercent"         # "%s" % var
     STRING_JOIN = "StringJoin"               # "".join([...])
     STRING_TEMPLATE = "StringTemplate"       # string.Template
-    TEMPLATE_LITERAL = "TemplateLiteral"     # JS/TS `...${var}...`
+    TEMPLATE_LITERAL = "TemplateLiteral"     # JS/TS `...${var}...` and Python f-strings
+    AWAIT_EXPRESSION = "AwaitExpression"     # await keyword for async operations
+    MEMBER_EXPRESSION = "MemberExpression"   # Object property access (obj.prop)
     
     # Security-specific nodes (NEW)
     TAINT_SOURCE = "TaintSource"             # User input entry point

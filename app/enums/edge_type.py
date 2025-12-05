@@ -7,11 +7,17 @@ class EdgeType(str, Enum):
     
     # Control flow
     CFG_NEXT = "CFG_NEXT"                    # Sequential execution
-    CFG_BRANCH_TRUE = "CFG_BRANCH_TRUE"      # If condition true
-    CFG_BRANCH_FALSE = "CFG_BRANCH_FALSE"    # If condition false
+    CFG_TRUE = "CFG_TRUE"                    # If condition true
+    CFG_FALSE = "CFG_FALSE"                  # If condition false
+    CFG_BRANCH_TRUE = "CFG_BRANCH_TRUE"      # Alias for CFG_TRUE
+    CFG_BRANCH_FALSE = "CFG_BRANCH_FALSE"    # Alias for CFG_FALSE
+    CFG_LOOP_BACK = "CFG_LOOP_BACK"          # Loop back edge (iteration)
     CFG_LOOP_ENTRY = "CFG_LOOP_ENTRY"        # Loop start
     CFG_LOOP_EXIT = "CFG_LOOP_EXIT"          # Loop end
     CFG_EXCEPTION = "CFG_EXCEPTION"          # Exception thrown
+    CFG_CALL = "CFG_CALL"                    # Function call edge
+    CFG_RETURN = "CFG_RETURN"                # Return from function
+    CFG_ASYNC = "CFG_ASYNC"                  # Async/await suspension point
     
     # Data flow
     DFG_FLOW = "DFG_FLOW"                    # General data flow
@@ -21,6 +27,9 @@ class EdgeType(str, Enum):
     DFG_RET = "DFG_RET"                      # Return → Caller
     DFG_PROPERTY = "DFG_PROPERTY"            # Object → Property access
     DFG_ATTR = "DFG_ATTR"                    # Object → Attribute
+    DFG_SUBSCRIPT = "DFG_SUBSCRIPT"          # Array/dict subscript access
+    DFG_CONTROL = "DFG_CONTROL"              # Control-dependent flow (implicit)
+    DFG_ASYNC = "DFG_ASYNC"                  # Async/await data flow
     
     # Call graph
     CALL_GRAPH = "CALL_GRAPH"                # Caller → Callee

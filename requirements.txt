@@ -16,3 +16,8 @@ pyyaml>=6.0  # For query store YAML loading
 openai>=1.0  # Optional: For LLM classification
 anthropic>=0.21  # Optional: For Claude classification
 groq>=0.4  # Optional: For Groq classification
+
+# Tree-sitter for enhanced AST parsing (JS/TS support)
+tree-sitter>=0.20.0
+tree-sitter-python>=0.20.0
+tree-sitter-javascript>=0.20.0

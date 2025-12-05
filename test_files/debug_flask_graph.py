@@ -5,7 +5,7 @@ import asyncio
 from pathlib import Path
 from app.domain.analysis.ast_parser import ASTParser
 from app.domain.analysis.cfg_builder import CFGBuilder
-from app.domain.analysis.dfg_builder import DFGBuilder
+from app.domain.analysis.dfg_builder_enhanced import EnhancedDFGBuilder as DFGBuilder
 from app.domain.analysis.semantic_graph_builder import SemanticGraphBuilder
 
 async def debug_graph():
