@@ -376,7 +376,8 @@ class SemanticPipeline:
                 "source": vuln.source_label,
                 "sink": vuln.sink_label,
                 "pattern": vuln.pattern_type,
-                "code_snippet": vuln.code_snippet
+                "code_snippet": vuln.code_snippet,
+                "data_flow_path": vuln.path_nodes  # Complete taint flow path for visualization
             },
             
             "analysis": {

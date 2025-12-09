@@ -1,51 +1,327 @@
-class ReportService:
-    def list(self, repo_id: int | None = None, date_from: str | None = None, date_to: str | None = None, tag: str | None = None):
-        return [
-            {
-                "id": 12,
-                "repo_id": 1,
-                "scan_id": "ae12f",
-                "created_at": "2025-11-01T10:05:00Z",
-                "total_vulns": 25,
-                "critical": 1,
-                "high": 5,
-                "medium": 11,
-                "low": 8,
-                "ai_accuracy": 0.81,
-                "compliance_flags": {"OWASP_TOP10": True, "CWE_25": True},
-            }
-        ]
+from typing import Optional
+from io import BytesIO
+import logging
+import csv
+from datetime import datetime
 
-    def get(self, report_id: int):
+logger = logging.getLogger(__name__)
+
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Preformatted
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    logger.warning("reportlab not installed. PDF generation will not be available.")
+
+
+class ReportService:
+    def __init__(self):
+        from app.services.scan_service import get_scan_service
+        self.scan_service = get_scan_service()
+
+    def list(self, repo_id: int | None = None, date_from: str | None = None, date_to: str | None = None, tag: str | None = None):
+        """List all reports/scans"""
+        # Get all completed scans from scan service
+        reports = []
+        for scan_id, job in self.scan_service.jobs.items():
+            if job.get("state") == "COMPLETED":
+                summary = job.get("summary", {})
+                by_severity = summary.get("by_severity", {})
+                reports.append({
+                    "id": scan_id,
+                    "scan_id": scan_id,
+                    "created_at": summary.get("created_at"),
+                    "completed_at": summary.get("completed_at"),
+                    "total_vulns": summary.get("vulnerabilities_found", 0),
+                    "critical": by_severity.get("critical", 0),
+                    "high": by_severity.get("high", 0),
+                    "medium": by_severity.get("medium", 0),
+                    "low": by_severity.get("low", 0),
+                    "input_type": summary.get("input_type"),
+                })
+        return reports
+
+    def get(self, scan_id: str):
+        """Get a specific report by scan_id"""
+        summary = self.scan_service.summary(scan_id)
+        if not summary:
+            return None
+        
         return {
-            "id": report_id,
+            "id": scan_id,
+            "scan_id": scan_id,
             "summary": {
-                "total_vulns": 25,
-                "critical": 1,
-                "high": 5,
-                "medium": 11,
-                "low": 8,
-                "ai_accuracy": 0.81,
+                "total_vulns": summary.vulnerabilities_found,
+                "critical": summary.by_severity.get("critical", 0),
+                "high": summary.by_severity.get("high", 0),
+                "medium": summary.by_severity.get("medium", 0),
+                "low": summary.by_severity.get("low", 0),
             },
-            "vulnerabilities": [
-                {"id": 1, "title": "SQL Injection", "severity": "HIGH"},
-                {"id": 2, "title": "XSS", "severity": "MEDIUM"},
-            ],
-            "insights": {"top_paths": 3, "fix_rate": 0.6},
+            "vulnerabilities": summary.vulnerabilities or [],
+            "created_at": summary.created_at,
+            "completed_at": summary.completed_at,
+            "duration_seconds": summary.duration_seconds,
         }
 
-    def export(self, report_id: int, fmt: str):
+    def export_pdf(self, scan_id: str) -> Optional[bytes]:
+        """Generate PDF report for a scan"""
+        if not REPORTLAB_AVAILABLE:
+            logger.error("reportlab not available. Install it with: pip install reportlab")
+            return None
+        
+        summary = self.scan_service.summary(scan_id)
+        if not summary:
+            return None
+        
+        try:
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            story = []
+            styles = getSampleStyleSheet()
+            
+            # Custom styles
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=24,
+                textColor=colors.HexColor('#1a1a1a'),
+                spaceAfter=30,
+            )
+            
+            # Add Heading4 style if not exists
+            if 'Heading4' not in styles:
+                styles.add(ParagraphStyle(
+                    name='Heading4',
+                    parent=styles['Heading3'],
+                    fontSize=11,
+                    textColor=colors.HexColor('#333333'),
+                    spaceAfter=6,
+                    spaceBefore=6,
+                ))
+            
+            # Title
+            story.append(Paragraph("Vulnerability Scan Report", title_style))
+            story.append(Spacer(1, 0.2 * inch))
+            
+            # Scan Info
+            info_data = [
+                ['Scan ID:', scan_id],
+                ['Status:', summary.status],
+                ['Input Type:', summary.input_type],
+                ['Files Scanned:', f"{summary.files_scanned} / {summary.total_files}"],
+                ['Duration:', f"{summary.duration_seconds}s"],
+                ['Created:', summary.created_at],
+                ['Completed:', summary.completed_at or 'N/A'],
+            ]
+            
+            info_table = Table(info_data, colWidths=[2*inch, 4*inch])
+            info_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.grey),
+                ('TEXTCOLOR', (0, 0), (0, -1), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 0.3 * inch))
+            
+            # Severity Summary
+            story.append(Paragraph("Vulnerability Summary", styles['Heading2']))
+            story.append(Spacer(1, 0.1 * inch))
+            
+            severity_data = [
+                ['Severity', 'Count'],
+                ['Critical', str(summary.by_severity.get('critical', 0))],
+                ['High', str(summary.by_severity.get('high', 0))],
+                ['Medium', str(summary.by_severity.get('medium', 0))],
+                ['Low', str(summary.by_severity.get('low', 0))],
+                ['Total', str(summary.vulnerabilities_found)],
+            ]
+            
+            severity_table = Table(severity_data, colWidths=[3*inch, 2*inch])
+            severity_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.beige),
+            ]))
+            story.append(severity_table)
+            story.append(Spacer(1, 0.3 * inch))
+            
+            # Vulnerabilities Details
+            if summary.vulnerabilities:
+                story.append(Paragraph("Vulnerability Details", styles['Heading2']))
+                story.append(Spacer(1, 0.1 * inch))
+                
+                for idx, vuln in enumerate(summary.vulnerabilities[:20], 1):  # Limit to 20
+                    # Title with severity
+                    vuln_type = vuln.get('type', 'Unknown Vulnerability')
+                    severity = vuln.get('severity', 'unknown').upper()
+                    vuln_title = f"{idx}. {vuln_type} - {severity}"
+                    story.append(Paragraph(vuln_title, styles['Heading3']))
+                    
+                    # Basic info
+                    location = vuln.get('location', {})
+                    file_path = location.get('file', 'N/A')
+                    start_line = location.get('start_line', 'N/A')
+                    end_line = location.get('end_line', 'N/A')
+                    
+                    info_text = f"<b>Location:</b> {file_path} (Lines {start_line}-{end_line})<br/>"
+                    info_text += f"<b>CWE:</b> {vuln.get('cwe', 'N/A')}<br/>"
+                    info_text += f"<b>OWASP:</b> {vuln.get('owasp', 'N/A')}<br/>"
+                    info_text += f"<b>Confidence:</b> {vuln.get('confidence', 0) * 100:.0f}%<br/>"
+                    story.append(Paragraph(info_text, styles['Normal']))
+                    story.append(Spacer(1, 0.1 * inch))
+                    
+                    # Data Flow Analysis
+                    evidence = vuln.get('evidence', {})
+                    if evidence:
+                        story.append(Paragraph("<b>🔍 Data Flow Analysis</b>", styles['Heading4']))
+                        flow_text = f"<b>Source:</b> {evidence.get('source', 'N/A')}<br/>"
+                        flow_text += f"<b>Sink:</b> {evidence.get('sink', 'N/A')}<br/>"
+                        flow_text += f"<b>Pattern:</b> {evidence.get('pattern', 'N/A')}<br/>"
+                        story.append(Paragraph(flow_text, styles['Normal']))
+                        story.append(Spacer(1, 0.1 * inch))
+                    
+                    # Static Detection
+                    analysis = vuln.get('analysis', {})
+                    static_detection = analysis.get('static_detection', {})
+                    if static_detection and static_detection.get('reason'):
+                        story.append(Paragraph("<b>⚡ Static Detection</b>", styles['Heading4']))
+                        detection_text = static_detection.get('reason', 'No details available')
+                        story.append(Paragraph(detection_text, styles['Normal']))
+                        story.append(Spacer(1, 0.1 * inch))
+                    
+                    # Code Snippet
+                    code_snippet = evidence.get('code_snippet')
+                    if code_snippet:
+                        story.append(Paragraph("<b>📄 Vulnerable Code</b>", styles['Heading4']))
+                        
+                        # Create a proper code style for Preformatted text
+                        code_style = ParagraphStyle(
+                            'CodeBlock',
+                            parent=styles['Code'],
+                            fontSize=8,
+                            fontName='Courier',
+                            leftIndent=20,
+                            rightIndent=20,
+                            backColor=colors.HexColor('#f5f5f5'),
+                            borderPadding=10,
+                            leading=12,  # Line spacing
+                            spaceBefore=6,
+                            spaceAfter=6,
+                        )
+                        
+                        # Use Preformatted to preserve line breaks and spacing
+                        # Don't escape HTML entities for Preformatted
+                        story.append(Preformatted(code_snippet, code_style))
+                        story.append(Spacer(1, 0.1 * inch))
+                    
+                    # AI Analysis
+                    llm_classification = analysis.get('llm_classification', {})
+                    if llm_classification:
+                        story.append(Paragraph("<b>🤖 AI Analysis</b>", styles['Heading4']))
+                        
+                        # Explanation
+                        explanation = llm_classification.get('explanation', '')
+                        if explanation:
+                            story.append(Paragraph(f"<b>Analysis:</b> {explanation}", styles['Normal']))
+                            story.append(Spacer(1, 0.05 * inch))
+                        
+                        # Remediation
+                        remediation = llm_classification.get('remediation', '')
+                        if remediation:
+                            story.append(Paragraph("<b>✅ Recommended Fix</b>", styles['Heading4']))
+                            story.append(Paragraph(remediation, styles['Normal']))
+                        
+                        # Exploitability
+                        exploitability = llm_classification.get('exploitability', 0)
+                        if exploitability:
+                            story.append(Paragraph(f"<b>Exploitability:</b> {exploitability * 100:.0f}%", styles['Normal']))
+                    
+                    story.append(Spacer(1, 0.3 * inch))
+                
+                if len(summary.vulnerabilities) > 20:
+                    story.append(Paragraph(
+                        f"<i>... and {len(summary.vulnerabilities) - 20} more vulnerabilities</i>",
+                        styles['Italic']
+                    ))
+            
+            # Build PDF
+            doc.build(story)
+            buffer.seek(0)
+            return buffer.getvalue()
+            
+        except Exception as e:
+            logger.error(f"Failed to generate PDF: {e}", exc_info=True)
+            return None
+
+    def export_csv(self, scan_id: str) -> Optional[str]:
+        """Generate CSV export for a scan"""
+        summary = self.scan_service.summary(scan_id)
+        if not summary or not summary.vulnerabilities:
+            return None
+        
+        output = BytesIO()
+        writer = csv.writer(output)
+        
+        # Header
+        writer.writerow(['Type', 'Severity', 'File', 'Line', 'Message', 'CWE'])
+        
+        # Vulnerabilities
+        for vuln in summary.vulnerabilities:
+            writer.writerow([
+                vuln.get('type', 'Unknown'),
+                vuln.get('severity', 'UNKNOWN'),
+                vuln.get('file', 'N/A'),
+                vuln.get('line', 'N/A'),
+                vuln.get('message', 'No description'),
+                vuln.get('cwe', '')
+            ])
+        
+        output.seek(0)
+        return output.getvalue().decode('utf-8')
+
+    def export(self, scan_id: str, fmt: str):
+        """Export report in specified format"""
         if fmt == "json":
-            return self.get(report_id)
-        if fmt == "csv":
-            return {"content": "id,title,severity\n1,SQL Injection,HIGH"}
-        if fmt == "pdf":
-            return {"content": f"PDF report {report_id} (stub)"}
+            return self.get(scan_id)
+        elif fmt == "csv":
+            csv_content = self.export_csv(scan_id)
+            if csv_content:
+                return {"content": csv_content}
+            return {"detail": "No data available for CSV export"}
+        elif fmt == "pdf":
+            # This shouldn't be called directly - use export_pdf for binary response
+            return {"detail": "Use /export endpoint with Accept: application/pdf header"}
         return {"detail": "Unsupported format"}
 
-    def compare(self, report_id_1: int, report_id_2: int):
+    def compare(self, scan_id_1: str, scan_id_2: str):
+        """Compare two scan reports"""
+        report1 = self.get(scan_id_1)
+        report2 = self.get(scan_id_2)
+        
+        if not report1 or not report2:
+            return {"detail": "One or both scans not found"}
+        
         return {
-            "report_1": self.get(report_id_1)["summary"],
-            "report_2": self.get(report_id_2)["summary"],
-            "diff": {"improved": 5, "regressed": 2},
+            "report_1": report1["summary"],
+            "report_2": report2["summary"],
+            "diff": {
+                "total_vulns_diff": report2["summary"]["total_vulns"] - report1["summary"]["total_vulns"],
+                "critical_diff": report2["summary"]["critical"] - report1["summary"]["critical"],
+                "high_diff": report2["summary"]["high"] - report1["summary"]["high"],
+                "medium_diff": report2["summary"]["medium"] - report1["summary"]["medium"],
+                "low_diff": report2["summary"]["low"] - report1["summary"]["low"],
+            },
         }

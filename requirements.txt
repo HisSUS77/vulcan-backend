@@ -16,3 +16,4 @@ pyyaml>=6.0  # For query store YAML loading
 openai>=1.0  # Optional: For LLM classification
 anthropic>=0.21  # Optional: For Claude classification
 groq>=0.4  # Optional: For Groq classification
+reportlab>=4.0  # For PDF report generation

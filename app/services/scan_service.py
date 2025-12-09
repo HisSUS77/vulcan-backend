@@ -9,6 +9,7 @@ from datetime import datetime
 import logging
 
 from semantic_engine.pipeline import get_pipeline, PipelineConfig
+from app.schemas.scan import ScanStatusRead, ScanSummary
 
 logger = logging.getLogger(__name__)
 
@@ -308,20 +309,30 @@ class ScanService:
                 "error": str(e)
             }
 
-    def status(self, scan_id: str) -> Dict[str, Any]:
+    def status(self, scan_id: str) -> ScanStatusRead:
         job = self.jobs.get(scan_id)
         if not job:
-            return {"state": "NOT_FOUND", "progress": 0}
+            return ScanStatusRead(
+                state="NOT_FOUND",
+                progress=0,
+                eta=None,
+                started_at=None,
+                finished_at=None,
+                current_file=None,
+                files_scanned=0,
+                total_files=0
+            )
         
-        return {
-            "state": job["state"],
-            "progress": job["progress"],
-            "started_at": job.get("started_at"),
-            "finished_at": job.get("finished_at"),
-            "current_file": job.get("current_file"),
-            "files_scanned": job.get("files_scanned", 0),
-            "total_files": job.get("total_files", 0)
-        }
+        return ScanStatusRead(
+            state=job["state"],
+            progress=job["progress"],
+            eta=None,
+            started_at=job.get("started_at"),
+            finished_at=job.get("finished_at"),
+            current_file=job.get("current_file"),
+            files_scanned=job.get("files_scanned", 0),
+            total_files=job.get("total_files", 0)
+        )
 
     def logs(self, scan_id: str) -> Dict[str, Any]:
         job = self.jobs.get(scan_id)
@@ -329,19 +340,21 @@ class ScanService:
             return {"logs": []}
         return {"logs": job["logs"][-100:]}  # last 100 logs
 
-    def summary(self, scan_id: str) -> Dict[str, Any]:
+    def summary(self, scan_id: str) -> Optional[ScanSummary]:
         job = self.jobs.get(scan_id)
         if not job:
             return None
         
         summary = job.get("summary")
-        if summary and job.get("vulnerabilities"):
-            print(f"[DEBUG] Adding {len(job['vulnerabilities'])} vulnerabilities to summary")
-            summary["vulnerabilities"] = job["vulnerabilities"]
-        else:
-            print(f"[DEBUG] Not adding vulnerabilities: summary={summary is not None}, vulns={len(job.get('vulnerabilities', []))}")
+        if not summary:
+            return None
         
-        return summary
+        # Add vulnerabilities to summary
+        if job.get("vulnerabilities"):
+            logger.debug(f"Adding {len(job['vulnerabilities'])} vulnerabilities to summary")
+            summary["vulnerabilities"] = job["vulnerabilities"]
+        
+        return ScanSummary(**summary)
 
     def cancel(self, scan_id: str) -> Dict[str, Any]:
         job = self.jobs.get(scan_id)

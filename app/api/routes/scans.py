@@ -61,21 +61,12 @@ async def scan_status(scan_id: str, user=Depends(get_current_user)):
     - current_file: Currently scanning file (for repo scans)
     - files_scanned/total_files: File progress counters
     """
-    job = service.status(scan_id)
+    status = service.status(scan_id)
     
-    if job.get("state") == "NOT_FOUND":
+    if status.state == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Scan not found")
     
-    return ScanStatusRead(
-        state=job["state"],
-        progress=job["progress"],
-        eta=None,  # Can calculate ETA based on progress
-        started_at=job.get("started_at"),
-        finished_at=job.get("finished_at"),
-        current_file=job.get("current_file"),
-        files_scanned=job.get("files_scanned", 0),
-        total_files=job.get("total_files", 0)
-    )
+    return status
 
 
 @router.get("/{scan_id}/logs")
@@ -104,7 +95,7 @@ async def scan_summary(scan_id: str, user=Depends(get_current_user)):
     if not summary:
         raise HTTPException(status_code=404, detail="Scan not found or not completed")
     
-    return ScanSummary(**summary)
+    return summary
 
 
 @router.post("/{scan_id}/cancel")
@@ -118,3 +109,4 @@ async def cancel_scan(scan_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Scan not found")
     
     return {"scan_id": scan_id, "status": "CANCELLED"}
+

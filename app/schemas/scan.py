@@ -15,11 +15,7 @@ class Language(str, Enum):
     PYTHON = "python"
     JAVASCRIPT = "javascript"
     TYPESCRIPT = "typescript"
-    JAVA = "java"
-    C = "c"
-    CPP = "cpp"
-    GO = "go"
-    PHP = "php"
+   
 
 
 class ScanStart(APIModel):
