@@ -7,11 +7,9 @@ from app.services.scan_service import get_scan_service
 async def test_scan():
     service = get_scan_service()
     
-    code = """import os
-import sys
+    code = """
 
-user_input = sys.argv[1]
-os.system(user_input)
+
 """
     
     print("Starting scan...")

@@ -3,95 +3,92 @@ import tempfile
 import os
 import time
 import uuid
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 from datetime import datetime
 import logging
+from typing import Dict, Any, Optional
+
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from semantic_engine.pipeline import get_pipeline, PipelineConfig
+from app.enums.role import UserRole
 from app.schemas.scan import ScanStatusRead, ScanSummary
+from app.db.mongo import to_object_id
 
 logger = logging.getLogger(__name__)
 
 
-# Singleton instance
-_scan_service_instance = None
-
-
-def get_scan_service():
-    """Get or create the singleton ScanService instance"""
-    global _scan_service_instance
-    if _scan_service_instance is None:
-        _scan_service_instance = ScanService()
-    return _scan_service_instance
-
-
 class ScanService:
-    def __init__(self) -> None:
-        self.jobs: Dict[str, Dict[str, Any]] = {}
+    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+        self.db = db
         self.pipeline = get_pipeline(PipelineConfig(enable_llm=True))
 
-    def start(
+    async def start(
         self,
+        user_id: str,
         code: Optional[str] = None,
         language: Optional[str] = None,
         filename: Optional[str] = None,
         repo_id: Optional[int] = None,
         branch: str = "main",
-        scan_mode: str = "DEEP"
+        scan_mode: str = "DEEP",
     ) -> tuple[str, str]:
-        """
-        Start a scan with either direct code or repository.
-        Returns (scan_id, input_type)
-        """
         scan_id = f"scan-{uuid.uuid4().hex[:12]}"
-        logger.info(f"[SCAN_SERVICE] Creating new scan: {scan_id}")
-        
+        input_type = "DIRECT_CODE" if code else "REPOSITORY"
+
+        object_id = to_object_id(user_id)
+        if not object_id:
+            raise ValueError("Invalid user_id")
+
+        now = datetime.utcnow()
+        scan_doc: Dict[str, Any] = {
+            "scan_id": scan_id,
+            "user_id": object_id,
+            "repo_id": repo_id,
+            "branch": branch,
+            "mode": scan_mode,
+            "state": "PENDING",
+            "progress": 0,
+            "started_at": None,
+            "finished_at": None,
+            "created_at": now,
+            "updated_at": now,
+            "input_type": input_type,
+            "current_file": None,
+            "files_scanned": 0,
+            "total_files": 0,
+            "vulnerabilities": [],
+            "summary": None,
+            "logs": [],
+        }
+        await self.db.scans.insert_one(scan_doc)
+
         if code:
-            # DIRECT CODE SCAN
-            input_type = "DIRECT_CODE"
-            logger.info(f"[SCAN_SERVICE] Storing job in self.jobs. Instance ID: {id(self)}")
-            self.jobs[scan_id] = {
-                "state": "PENDING",
-                "progress": 0,
-                "logs": [],
-                "started_at": None,
-                "finished_at": None,
-                "summary": None,
-                "input_type": input_type,
-                "current_file": filename or "code.py",
-                "files_scanned": 0,
-                "total_files": 1,
-                "vulnerabilities": []
-            }
-            
-            # Start background task for direct code scan
             asyncio.create_task(
                 self._run_direct_code_scan(scan_id, code, language, filename, scan_mode)
             )
         else:
-            # REPOSITORY SCAN
-            input_type = "REPOSITORY"
-            self.jobs[scan_id] = {
-                "state": "PENDING",
-                "progress": 0,
-                "logs": [],
-                "started_at": None,
-                "finished_at": None,
-                "summary": None,
-                "input_type": input_type,
-                "current_file": None,
-                "files_scanned": 0,
-                "total_files": 0,
-                "vulnerabilities": []
-            }
-            
-            # Start background task for repository scan
             asyncio.create_task(
                 self._run_repository_scan(scan_id, repo_id, branch, scan_mode)
             )
-        
+
         return scan_id, input_type
+
+    async def _append_logs(self, scan_id: str, logs: list[str]) -> None:
+        if not logs:
+            return
+        await self.db.scans.update_one(
+            {"scan_id": scan_id},
+            {
+                "$push": {"logs": {"$each": logs}},
+                "$set": {"updated_at": datetime.utcnow()},
+            },
+        )
+
+    async def _update_scan(self, scan_id: str, updates: Dict[str, Any], logs: Optional[list[str]] = None) -> None:
+        update_doc: Dict[str, Any] = {"$set": {**updates, "updated_at": datetime.utcnow()}}
+        if logs:
+            update_doc["$push"] = {"logs": {"$each": logs}}
+        await self.db.scans.update_one({"scan_id": scan_id}, update_doc)
 
     async def _run_direct_code_scan(
         self,
@@ -99,22 +96,16 @@ class ScanService:
         code: str,
         language: str,
         filename: Optional[str],
-        scan_mode: str
+        scan_mode: str,
     ):
-        """Process direct code scan asynchronously"""
-        job = self.jobs[scan_id]
         start_time = time.time()
-        
         try:
-            # Update status to RUNNING
-            job["state"] = "RUNNING"
-            job["started_at"] = datetime.utcnow().isoformat()
-            job["logs"].append(f"[INFO] Starting direct code scan")
-            job["logs"].append(f"[INFO] Language: {language}")
-            job["logs"].append(f"[INFO] Lines of code: {len(code.split(chr(10)))}")
-            job["progress"] = 10
-            
-            # Determine file extension
+            await self._update_scan(
+                scan_id,
+                {"state": "RUNNING", "started_at": datetime.utcnow().isoformat(), "progress": 10},
+                ["[INFO] Starting direct code scan"],
+            )
+
             ext_map = {
                 "python": ".py",
                 "javascript": ".js",
@@ -123,61 +114,43 @@ class ScanService:
                 "c": ".c",
                 "cpp": ".cpp",
                 "go": ".go",
-                "php": ".php"
+                "php": ".php",
             }
             ext = ext_map.get(language, ".txt")
-            
-            # Use provided filename or generate one
             if not filename:
                 filename = f"code{ext}"
-            
-            job["current_file"] = filename
-            job["logs"].append(f"[INFO] Analyzing file: {filename}")
-            job["progress"] = 25
-            
-            # Create temporary file
+
+            await self._update_scan(
+                scan_id,
+                {"current_file": filename, "progress": 25},
+                [f"[INFO] Analyzing file: {filename}"],
+            )
+
             with tempfile.NamedTemporaryFile(
-                mode='w',
+                mode="w",
                 suffix=ext,
                 delete=False,
-                encoding='utf-8'
+                encoding="utf-8",
             ) as tmp_file:
                 tmp_file.write(code)
                 tmp_path = tmp_file.name
-            
+
             try:
-                # Run semantic analysis
-                job["logs"].append(f"[INFO] Building semantic graph...")
-                job["logs"].append(f"[DEBUG] Code to analyze: {code[:200]}...")
-                job["progress"] = 40
-                
+                await self._append_logs(scan_id, ["[INFO] Building semantic graph..."])
                 result = await self.pipeline.analyze_code(
                     filename=filename,
                     code=code,
-                    language=language
+                    language=language,
                 )
-                
-                job["progress"] = 80
-                job["logs"].append(f"[INFO] Graph built: {result.graph_nodes} nodes, {result.graph_edges} edges")
-                job["logs"].append(f"[INFO] Rules executed: {result.rules_executed}")
-                job["logs"].append(f"[INFO] Slices found: {len(result.slices) if hasattr(result, 'slices') else 'N/A'}")
-                job["logs"].append(f"[INFO] Vulnerabilities found: {result.vulnerabilities_found}")
-                job["logs"].append(f"[DEBUG] Vulnerabilities: {result.vulnerabilities}")
-                
-                # Store vulnerabilities and graph data
-                job["vulnerabilities"] = result.vulnerabilities
-                job["graph_data"] = result.graph_data  # Store for visualization
-                job["files_scanned"] = 1
-                
-                # Build summary
+
+                vulnerabilities = result.vulnerabilities
                 by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-                for vuln in result.vulnerabilities:
+                for vuln in vulnerabilities:
                     severity = vuln.get("severity", "low")
                     by_severity[severity] = by_severity.get(severity, 0) + 1
-                
+
                 duration = time.time() - start_time
-                
-                job["summary"] = {
+                summary = {
                     "scan_id": scan_id,
                     "status": "COMPLETED",
                     "input_type": "DIRECT_CODE",
@@ -186,133 +159,125 @@ class ScanService:
                     "vulnerabilities_found": result.vulnerabilities_found,
                     "by_severity": by_severity,
                     "duration_seconds": round(duration, 2),
-                    "created_at": job["started_at"],
-                    "completed_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "vulnerabilities": vulnerabilities,
                 }
-                
-                job["state"] = "COMPLETED"
-                job["finished_at"] = datetime.utcnow().isoformat()
-                job["progress"] = 100
-                job["logs"].append(f"[SUCCESS] Scan completed in {duration:.2f}s")
-                
+
+                await self._update_scan(
+                    scan_id,
+                    {
+                        "state": "COMPLETED",
+                        "progress": 100,
+                        "finished_at": datetime.utcnow().isoformat(),
+                        "summary": summary,
+                        "vulnerabilities": vulnerabilities,
+                        "files_scanned": 1,
+                        "total_files": 1,
+                        "graph_data": result.graph_data,
+                    },
+                    [
+                        f"[INFO] Graph built: {result.graph_nodes} nodes, {result.graph_edges} edges",
+                        f"[INFO] Rules executed: {result.rules_executed}",
+                        f"[INFO] Vulnerabilities found: {result.vulnerabilities_found}",
+                        f"[SUCCESS] Scan completed in {duration:.2f}s",
+                    ],
+                )
             finally:
-                # Clean up temporary file
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
-                    
         except Exception as e:
             logger.error(f"Direct code scan failed: {e}", exc_info=True)
-            job["state"] = "FAILED"
-            job["finished_at"] = datetime.utcnow().isoformat()
-            job["logs"].append(f"[ERROR] Scan failed: {str(e)}")
-            job["summary"] = {
-                "scan_id": scan_id,
-                "status": "FAILED",
-                "error": str(e)
-            }
+            await self._update_scan(
+                scan_id,
+                {
+                    "state": "FAILED",
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "summary": {"scan_id": scan_id, "status": "FAILED", "error": str(e)},
+                },
+                [f"[ERROR] Scan failed: {str(e)}"],
+            )
 
     async def _run_repository_scan(
         self,
         scan_id: str,
         repo_id: int,
         branch: str,
-        scan_mode: str
+        scan_mode: str,
     ):
-        """Process repository scan asynchronously"""
-        job = self.jobs[scan_id]
         start_time = time.time()
-        
         try:
-            # Update status to RUNNING
-            job["state"] = "RUNNING"
-            job["started_at"] = datetime.utcnow().isoformat()
-            job["logs"].append(f"[INFO] Starting repository scan")
-            job["logs"].append(f"[INFO] Repository ID: {repo_id}")
-            job["logs"].append(f"[INFO] Branch: {branch}")
-            job["progress"] = 5
-            
-            # Get repository from database (TODO: implement actual DB lookup)
-            job["logs"].append(f"[INFO] Fetching repository details...")
-            # repo = await get_repository_by_id(repo_id)
-            # For now, simulate repository
-            repo_url = f"https://github.com/example/repo-{repo_id}"
-            
-            job["logs"].append(f"[INFO] Repository URL: {repo_url}")
-            job["progress"] = 10
-            
-            # Clone/fetch repository (TODO: implement actual git operations)
-            job["logs"].append(f"[INFO] Cloning repository...")
-            await asyncio.sleep(1)  # Simulate cloning
-            
-            # For now, we'll scan a mock directory structure
-            # In production, this would scan the actual cloned repo
-            job["logs"].append(f"[WARN] Repository scanning not yet fully implemented")
-            job["logs"].append(f"[INFO] This is a placeholder - will scan actual repos in production")
-            
-            # Simulate finding files
-            mock_files = [
-                "app.py",
-                "models/user.py",
-                "routes/auth.py",
-                "utils/db.py"
-            ]
-            
-            job["total_files"] = len(mock_files)
-            job["progress"] = 20
-            
-            all_vulnerabilities = []
-            
-            # Scan each file
+            await self._update_scan(
+                scan_id,
+                {"state": "RUNNING", "started_at": datetime.utcnow().isoformat(), "progress": 5},
+                ["[INFO] Starting repository scan"],
+            )
+
+            await self._append_logs(scan_id, [f"[INFO] Repository ID: {repo_id}", f"[INFO] Branch: {branch}"])
+
+            await asyncio.sleep(1)
+            await self._append_logs(scan_id, ["[WARN] Repository scanning not yet fully implemented"])
+
+            mock_files = ["app.py", "models/user.py", "routes/auth.py", "utils/db.py"]
+            await self._update_scan(scan_id, {"total_files": len(mock_files), "progress": 20})
+
             for i, file_path in enumerate(mock_files):
-                job["current_file"] = file_path
-                job["logs"].append(f"[INFO] Scanning {file_path}...")
-                
-                # Simulate file scanning (would be actual analysis in production)
+                await self._update_scan(
+                    scan_id,
+                    {
+                        "current_file": file_path,
+                        "files_scanned": i + 1,
+                        "progress": 20 + int((i + 1) / len(mock_files) * 70),
+                    },
+                    [f"[INFO] Scanning {file_path}..."],
+                )
                 await asyncio.sleep(0.5)
-                
-                job["files_scanned"] = i + 1
-                job["progress"] = 20 + int((i + 1) / len(mock_files) * 70)
-                
-                job["logs"].append(f"[INFO] {file_path}: Analysis complete")
-            
-            # Build summary
-            by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
             duration = time.time() - start_time
-            
-            job["summary"] = {
+            by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            summary = {
                 "scan_id": scan_id,
                 "status": "COMPLETED",
                 "input_type": "REPOSITORY",
                 "total_files": len(mock_files),
                 "files_scanned": len(mock_files),
-                "vulnerabilities_found": len(all_vulnerabilities),
+                "vulnerabilities_found": 0,
                 "by_severity": by_severity,
                 "duration_seconds": round(duration, 2),
-                "created_at": job["started_at"],
-                "completed_at": datetime.utcnow().isoformat()
-            }
-            
-            job["vulnerabilities"] = all_vulnerabilities
-            job["state"] = "COMPLETED"
-            job["finished_at"] = datetime.utcnow().isoformat()
-            job["progress"] = 100
-            job["logs"].append(f"[SUCCESS] Repository scan completed in {duration:.2f}s")
-            
-        except Exception as e:
-            logger.error(f"Repository scan failed: {e}", exc_info=True)
-            job["state"] = "FAILED"
-            job["finished_at"] = datetime.utcnow().isoformat()
-            job["logs"].append(f"[ERROR] Scan failed: {str(e)}")
-            job["summary"] = {
-                "scan_id": scan_id,
-                "status": "FAILED",
-                "error": str(e)
+                "created_at": datetime.utcnow().isoformat(),
+                "completed_at": datetime.utcnow().isoformat(),
+                "vulnerabilities": [],
             }
 
-    def status(self, scan_id: str) -> ScanStatusRead:
-        job = self.jobs.get(scan_id)
-        if not job:
+            await self._update_scan(
+                scan_id,
+                {
+                    "state": "COMPLETED",
+                    "progress": 100,
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "summary": summary,
+                    "vulnerabilities": [],
+                },
+                [f"[SUCCESS] Repository scan completed in {duration:.2f}s"],
+            )
+        except Exception as e:
+            logger.error(f"Repository scan failed: {e}", exc_info=True)
+            await self._update_scan(
+                scan_id,
+                {
+                    "state": "FAILED",
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "summary": {"scan_id": scan_id, "status": "FAILED", "error": str(e)},
+                },
+                [f"[ERROR] Scan failed: {str(e)}"],
+            )
+
+    async def status(self, scan_id: str) -> ScanStatusRead:
+        scan = await self.db.scans.find_one({"scan_id": scan_id})
+        if not scan:
             return ScanStatusRead(
+                scan_id=scan_id,
+                user_id="",
                 state="NOT_FOUND",
                 progress=0,
                 eta=None,
@@ -320,47 +285,71 @@ class ScanService:
                 finished_at=None,
                 current_file=None,
                 files_scanned=0,
-                total_files=0
+                total_files=0,
             )
-        
+
         return ScanStatusRead(
-            state=job["state"],
-            progress=job["progress"],
+            scan_id=scan_id,
+            user_id=str(scan.get("user_id")),
+            state=scan.get("state", "UNKNOWN"),
+            progress=scan.get("progress", 0),
             eta=None,
-            started_at=job.get("started_at"),
-            finished_at=job.get("finished_at"),
-            current_file=job.get("current_file"),
-            files_scanned=job.get("files_scanned", 0),
-            total_files=job.get("total_files", 0)
+            started_at=scan.get("started_at"),
+            finished_at=scan.get("finished_at"),
+            current_file=scan.get("current_file"),
+            files_scanned=scan.get("files_scanned", 0),
+            total_files=scan.get("total_files", 0),
+            created_at=scan.get("created_at"),
+            updated_at=scan.get("updated_at"),
         )
 
-    def logs(self, scan_id: str) -> Dict[str, Any]:
-        job = self.jobs.get(scan_id)
-        if not job:
+    async def logs(self, scan_id: str) -> Dict[str, Any]:
+        scan = await self.db.scans.find_one({"scan_id": scan_id}, {"logs": {"$slice": -100}})
+        if not scan:
             return {"logs": []}
-        return {"logs": job["logs"][-100:]}  # last 100 logs
+        return {"logs": scan.get("logs", [])}
 
-    def summary(self, scan_id: str) -> Optional[ScanSummary]:
-        job = self.jobs.get(scan_id)
-        if not job:
+    async def summary(self, scan_id: str) -> Optional[ScanSummary]:
+        scan = await self.db.scans.find_one({"scan_id": scan_id})
+        if not scan:
             return None
-        
-        summary = job.get("summary")
+        summary = scan.get("summary")
         if not summary:
             return None
-        
-        # Add vulnerabilities to summary
-        if job.get("vulnerabilities"):
-            logger.debug(f"Adding {len(job['vulnerabilities'])} vulnerabilities to summary")
-            summary["vulnerabilities"] = job["vulnerabilities"]
-        
-        return ScanSummary(**summary)
+        merged = {
+            "scan_id": scan_id,
+            "user_id": str(scan.get("user_id")),
+            "status": summary.get("status", scan.get("state", "UNKNOWN")),
+            "input_type": summary.get("input_type", scan.get("input_type")),
+            "total_files": summary.get("total_files", scan.get("total_files", 0)),
+            "files_scanned": summary.get("files_scanned", scan.get("files_scanned", 0)),
+            "vulnerabilities_found": summary.get(
+                "vulnerabilities_found",
+                len(summary.get("vulnerabilities", []) or []),
+            ),
+            "by_severity": summary.get("by_severity", {"critical": 0, "high": 0, "medium": 0, "low": 0}),
+            "duration_seconds": summary.get("duration_seconds", 0.0),
+            "created_at": summary.get("created_at", scan.get("created_at")),
+            "completed_at": summary.get("completed_at", scan.get("finished_at")),
+            "vulnerabilities": summary.get("vulnerabilities"),
+        }
+        return ScanSummary(**merged)
 
-    def cancel(self, scan_id: str) -> Dict[str, Any]:
-        job = self.jobs.get(scan_id)
-        if not job:
+    async def cancel(self, scan_id: str) -> Dict[str, Any]:
+        scan = await self.db.scans.find_one({"scan_id": scan_id})
+        if not scan:
             return {"state": "NOT_FOUND"}
-        job["state"] = "CANCELLED"
-        job["finished_at"] = datetime.utcnow().isoformat()
-        job["logs"].append("[INFO] Scan cancelled by user")
+        await self._update_scan(
+            scan_id,
+            {"state": "CANCELLED", "finished_at": datetime.utcnow().isoformat()},
+            ["[INFO] Scan cancelled by user"],
+        )
         return {"state": "CANCELLED"}
+
+    async def ensure_access(self, scan_id: str, user: dict) -> bool:
+        scan = await self.db.scans.find_one({"scan_id": scan_id})
+        if not scan:
+            return False
+        if user.get("role") == UserRole.ADMIN.value:
+            return True
+        return str(scan.get("user_id")) == user.get("id")

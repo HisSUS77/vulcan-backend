@@ -6,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.api_v1 import api_router
-from app.db.init_db import init_models, seed_admin
-from app.db.session import SessionLocal
+from app.db.init_db import init_models
+from app.db.mongo_init import ensure_indexes, seed_admin
 
 
 app = FastAPI(title=settings.PROJECT_NAME)
@@ -29,8 +29,8 @@ async def health():
 @app.on_event("startup")
 async def on_startup():
     await init_models()
-    async with SessionLocal() as session:
-        await seed_admin(session)
+    await ensure_indexes()
+    await seed_admin()
 
 
 app.include_router(api_router, prefix=settings.API_V1_STR)

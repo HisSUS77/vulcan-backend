@@ -65,10 +65,13 @@ class ScanResponse(APIModel):
     status: str = Field("PENDING", description="Initial scan status")
     message: str = Field("Scan initiated successfully")
     input_type: str = Field(..., description="DIRECT_CODE or REPOSITORY")
+    user_id: str = Field(..., description="ID of the user who initiated the scan")
     created_at: str = Field(..., description="ISO timestamp of scan creation")
 
 
 class ScanStatusRead(APIModel):
+    scan_id: str
+    user_id: str
     state: str
     progress: int
     eta: int | None = None
@@ -77,10 +80,13 @@ class ScanStatusRead(APIModel):
     current_file: str | None = None
     files_scanned: int = 0
     total_files: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ScanSummary(APIModel):
     scan_id: str
+    user_id: str
     status: str
     input_type: str
     total_files: int

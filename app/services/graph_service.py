@@ -1,6 +1,8 @@
 from typing import Dict, Any, Optional
 import logging
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
 logger = logging.getLogger(__name__)
 
 
@@ -10,12 +12,10 @@ class GraphService:
     Returns actual AST/CFG/DFG graphs from the semantic analysis engine.
     """
     
-    def __init__(self) -> None:
-        # Import scan service to access stored graphs
-        from app.services.scan_service import get_scan_service
-        self.scan_service = get_scan_service()  # Use singleton instance
+    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+        self.db = db
 
-    def graph(self, scan_id: str, file_id: str, gtype: str) -> Dict[str, Any]:
+    async def graph(self, scan_id: str, file_id: str, gtype: str) -> Dict[str, Any]:
         """
         Get graph visualization for a scanned file.
         
@@ -27,12 +27,9 @@ class GraphService:
         Returns:
             Graph data with nodes and edges
         """
-        # Get scan job
-        logger.info(f"[GRAPH_SERVICE] Looking for scan {scan_id}. ScanService instance ID: {id(self.scan_service)}")
-        logger.info(f"[GRAPH_SERVICE] Available scan IDs: {list(self.scan_service.jobs.keys())}")
-        job = self.scan_service.jobs.get(scan_id)
+        scan = await self.db.scans.find_one({"scan_id": scan_id})
         
-        if not job:
+        if not scan:
             return {
                 "type": gtype.upper(),
                 "nodes": [],
@@ -42,17 +39,17 @@ class GraphService:
             }
         
         # Check if scan is complete
-        if job.get("state") != "COMPLETED":
+        if scan.get("state") != "COMPLETED":
             return {
                 "type": gtype.upper(),
                 "nodes": [],
                 "edges": [],
                 "error": "Scan not completed",
-                "detail": f"Scan is in state: {job.get('state')}. Wait for completion."
+                "detail": f"Scan is in state: {scan.get('state')}. Wait for completion."
             }
         
         # Get stored graph data
-        graph_data = job.get("graph_data")
+        graph_data = scan.get("graph_data")
         
         if not graph_data:
             return {

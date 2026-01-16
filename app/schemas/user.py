@@ -1,11 +1,12 @@
 from app.schemas.common import APIModel
 from pydantic import EmailStr
+from app.enums.role import UserRole
 
 
 class UserPublic(APIModel):
-    id: int
+    id: str
     email: EmailStr
     full_name: str | None = None
-    role: str
+    role: UserRole
     is_active: bool
-    is_superuser: bool
+    is_superuser: bool = False

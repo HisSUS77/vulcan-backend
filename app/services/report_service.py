@@ -4,6 +4,11 @@ import logging
 import csv
 from datetime import datetime
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.schemas.scan import ScanSummary
+from app.db.mongo import to_object_id
+from app.enums.role import UserRole
 logger = logging.getLogger(__name__)
 
 try:
@@ -19,21 +24,61 @@ except ImportError:
 
 
 class ReportService:
-    def __init__(self):
-        from app.services.scan_service import get_scan_service
-        self.scan_service = get_scan_service()
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self.db = db
 
-    def list(self, repo_id: int | None = None, date_from: str | None = None, date_to: str | None = None, tag: str | None = None):
+    def _base_filter(self, user: dict) -> dict:
+        if user.get("role") == UserRole.ADMIN.value:
+            return {"state": "COMPLETED"}
+        object_id = to_object_id(user.get("id", ""))
+        if not object_id:
+            return {"state": "COMPLETED", "user_id": None}
+        return {"state": "COMPLETED", "user_id": object_id}
+
+    async def _get_summary(self, scan_id: str, user: dict) -> Optional[ScanSummary]:
+        query = {"scan_id": scan_id, **self._base_filter(user)}
+        scan = await self.db.scans.find_one(query)
+        if not scan or not scan.get("summary"):
+            return None
+        summary = scan["summary"]
+        merged = {
+            "scan_id": scan_id,
+            "user_id": str(scan.get("user_id")),
+            "status": summary.get("status", scan.get("state", "UNKNOWN")),
+            "input_type": summary.get("input_type", scan.get("input_type")),
+            "total_files": summary.get("total_files", scan.get("total_files", 0)),
+            "files_scanned": summary.get("files_scanned", scan.get("files_scanned", 0)),
+            "vulnerabilities_found": summary.get(
+                "vulnerabilities_found",
+                len(summary.get("vulnerabilities", []) or []),
+            ),
+            "by_severity": summary.get("by_severity", {"critical": 0, "high": 0, "medium": 0, "low": 0}),
+            "duration_seconds": summary.get("duration_seconds", 0.0),
+            "created_at": summary.get("created_at", scan.get("created_at")),
+            "completed_at": summary.get("completed_at", scan.get("finished_at")),
+            "vulnerabilities": summary.get("vulnerabilities"),
+        }
+        return ScanSummary(**merged)
+
+    async def list(
+        self,
+        user: dict,
+        repo_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        tag: str | None = None,
+    ):
         """List all reports/scans"""
-        # Get all completed scans from scan service
         reports = []
-        for scan_id, job in self.scan_service.jobs.items():
-            if job.get("state") == "COMPLETED":
-                summary = job.get("summary", {})
-                by_severity = summary.get("by_severity", {})
-                reports.append({
-                    "id": scan_id,
-                    "scan_id": scan_id,
+        query = self._base_filter(user)
+        cursor = self.db.scans.find(query)
+        async for scan in cursor:
+            summary = scan.get("summary") or {}
+            by_severity = summary.get("by_severity", {})
+            reports.append(
+                {
+                    "id": scan.get("scan_id"),
+                    "scan_id": scan.get("scan_id"),
                     "created_at": summary.get("created_at"),
                     "completed_at": summary.get("completed_at"),
                     "total_vulns": summary.get("vulnerabilities_found", 0),
@@ -42,12 +87,13 @@ class ReportService:
                     "medium": by_severity.get("medium", 0),
                     "low": by_severity.get("low", 0),
                     "input_type": summary.get("input_type"),
-                })
+                }
+            )
         return reports
 
-    def get(self, scan_id: str):
+    async def get(self, scan_id: str, user: dict):
         """Get a specific report by scan_id"""
-        summary = self.scan_service.summary(scan_id)
+        summary = await self._get_summary(scan_id, user)
         if not summary:
             return None
         
@@ -67,13 +113,13 @@ class ReportService:
             "duration_seconds": summary.duration_seconds,
         }
 
-    def export_pdf(self, scan_id: str) -> Optional[bytes]:
+    async def export_pdf(self, scan_id: str, user: dict) -> Optional[bytes]:
         """Generate PDF report for a scan"""
         if not REPORTLAB_AVAILABLE:
             logger.error("reportlab not available. Install it with: pip install reportlab")
             return None
         
-        summary = self.scan_service.summary(scan_id)
+        summary = await self._get_summary(scan_id, user)
         if not summary:
             return None
         
@@ -266,9 +312,9 @@ class ReportService:
             logger.error(f"Failed to generate PDF: {e}", exc_info=True)
             return None
 
-    def export_csv(self, scan_id: str) -> Optional[str]:
+    async def export_csv(self, scan_id: str, user: dict) -> Optional[str]:
         """Generate CSV export for a scan"""
-        summary = self.scan_service.summary(scan_id)
+        summary = await self._get_summary(scan_id, user)
         if not summary or not summary.vulnerabilities:
             return None
         
@@ -292,12 +338,12 @@ class ReportService:
         output.seek(0)
         return output.getvalue().decode('utf-8')
 
-    def export(self, scan_id: str, fmt: str):
+    async def export(self, scan_id: str, fmt: str, user: dict):
         """Export report in specified format"""
         if fmt == "json":
-            return self.get(scan_id)
+            return await self.get(scan_id, user)
         elif fmt == "csv":
-            csv_content = self.export_csv(scan_id)
+            csv_content = await self.export_csv(scan_id, user)
             if csv_content:
                 return {"content": csv_content}
             return {"detail": "No data available for CSV export"}
@@ -306,10 +352,10 @@ class ReportService:
             return {"detail": "Use /export endpoint with Accept: application/pdf header"}
         return {"detail": "Unsupported format"}
 
-    def compare(self, scan_id_1: str, scan_id_2: str):
+    async def compare(self, scan_id_1: str, scan_id_2: str, user: dict):
         """Compare two scan reports"""
-        report1 = self.get(scan_id_1)
-        report2 = self.get(scan_id_2)
+        report1 = await self.get(scan_id_1, user)
+        report2 = await self.get(scan_id_2, user)
         
         if not report1 or not report2:
             return {"detail": "One or both scans not found"}

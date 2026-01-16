@@ -12,6 +12,13 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = Field(default="sqlite+aiosqlite:///./vulcan.db")
 
+    MONGO_URI: str = Field(default="")
+    MONGO_HOST: str = Field(default="localhost")
+    MONGO_PORT: int = Field(default=27017)
+    MONGO_DB_NAME: str = Field(default="vulcan")
+    MONGO_USER: str = Field(default="")
+    MONGO_PASSWORD: str = Field(default="")
+
     JWT_SECRET: str = Field(default="change-me-super-secret")
     JWT_ALGORITHM: str = Field(default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
@@ -19,6 +26,19 @@ class Settings(BaseSettings):
 
     DEFAULT_ADMIN_EMAIL: str = Field(default="admin@vulcan.ai")
     DEFAULT_ADMIN_PASSWORD: str = Field(default="admin123!")
+
+    FRONTEND_BASE_URL: str = Field(default="http://localhost:3000")
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+
+    SMTP_HOST: str = Field(default="")
+    SMTP_PORT: int = Field(default=587)
+    SMTP_USER: str = Field(default="")
+    SMTP_PASSWORD: str = Field(default="")
+    SMTP_USE_TLS: bool = Field(default=True)
+    SMTP_FROM_EMAIL: str = Field(default="")
+    SMTP_FROM_NAME: str = Field(default="Vulcan Security")
+
+    SENDGRID_API_KEY: str = Field(default="")
 
 
 settings = Settings()

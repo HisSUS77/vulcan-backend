@@ -1,11 +1,12 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.core.security import decode_token
+from app.db.mongo import get_mongo_db, to_object_id
 from app.db.session import get_session
-from app.models.user import User
+from app.enums.role import UserRole
 
 
 auth_scheme = HTTPBearer(auto_error=False)
@@ -17,8 +18,8 @@ async def get_db(session: AsyncSession = Depends(get_session)) -> AsyncSession:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
-    session: AsyncSession = Depends(get_session),
-) -> User:
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+) -> dict:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     token = credentials.credentials
@@ -29,7 +30,18 @@ async def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
-    user = await session.get(User, int(user_id))
+    object_id = to_object_id(user_id)
+    if not object_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    user = await db.users.find_one({"_id": object_id})
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
+    role = user.get("role") or UserRole.NORMAL.value
+    return {
+        "id": str(user["_id"]),
+        "email": user.get("email"),
+        "full_name": user.get("full_name"),
+        "role": role,
+        "is_active": user.get("is_active", True),
+        "is_superuser": role == UserRole.ADMIN.value,
+    }
