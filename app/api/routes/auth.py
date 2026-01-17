@@ -1,4 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+import json
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import get_current_user
@@ -17,6 +22,7 @@ from app.schemas.auth import (
 from app.schemas.user import UserPublic
 from app.services.auth_service import AuthService
 from app.core.exceptions import ConflictException, AuthenticationException
+from app.core.config import settings
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -89,14 +95,175 @@ async def refresh(user=Depends(get_current_user)):
 
 @router.get("/oauth/github")
 async def oauth_github():
-    """OAuth2 GitHub login (Not Implemented)."""
-    raise HTTPException(status_code=501, detail="GitHub OAuth not implemented yet")
+    """OAuth2 GitHub login redirect."""
+    if not settings.GITHUB_OAUTH_CLIENT_ID or not settings.GITHUB_OAUTH_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="GitHub OAuth is not configured")
+    params = {
+        "client_id": settings.GITHUB_OAUTH_CLIENT_ID,
+        "redirect_uri": settings.GITHUB_OAUTH_REDIRECT_URI,
+        "scope": "read:user user:email",
+    }
+    url = "https://github.com/login/oauth/authorize?" + urlencode(params)
+    return RedirectResponse(url)
 
 
 @router.get("/oauth/google")
 async def oauth_google():
-    """OAuth2 Google login (Not Implemented)."""
-    raise HTTPException(status_code=501, detail="Google OAuth not implemented yet")
+    """OAuth2 Google login redirect."""
+    if not settings.GOOGLE_OAUTH_CLIENT_ID or not settings.GOOGLE_OAUTH_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+    params = {
+        "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+    return RedirectResponse(url)
+
+
+@router.get("/oauth/google/callback")
+async def oauth_google_callback(code: str, db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """OAuth2 Google callback to exchange code and issue JWT."""
+    if not settings.GOOGLE_OAUTH_CLIENT_ID or not settings.GOOGLE_OAUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+
+    token_payload = urlencode(
+        {
+            "code": code,
+            "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+            "redirect_uri": settings.GOOGLE_OAUTH_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }
+    ).encode("utf-8")
+    token_req = Request(
+        "https://oauth2.googleapis.com/token",
+        data=token_payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(token_req, timeout=10) as resp:
+            token_data = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"Google token exchange failed: {detail}") from exc
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Google token exchange error: {exc.reason}") from exc
+
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google token exchange missing access_token")
+
+    userinfo_req = Request(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    try:
+        with urlopen(userinfo_req, timeout=10) as resp:
+            userinfo = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"Google userinfo failed: {detail}") from exc
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Google userinfo error: {exc.reason}") from exc
+
+    email = userinfo.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Google userinfo missing email")
+
+    full_name = userinfo.get("name")
+    google_sub = userinfo.get("id") or userinfo.get("sub", "")
+
+    user = await auth_service.get_or_create_google_user(db, email, full_name, google_sub)
+    token = auth_service.issue_token(user)
+
+    redirect_params = urlencode({"token": token["access_token"]})
+    redirect_url = f"{settings.FRONTEND_OAUTH_REDIRECT_URL}?{redirect_params}"
+    return RedirectResponse(redirect_url)
+
+
+@router.get("/oauth/github/callback")
+async def oauth_github_callback(code: str, db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """OAuth2 GitHub callback to exchange code and issue JWT."""
+    if not settings.GITHUB_OAUTH_CLIENT_ID or not settings.GITHUB_OAUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="GitHub OAuth is not configured")
+
+    token_payload = urlencode(
+        {
+            "client_id": settings.GITHUB_OAUTH_CLIENT_ID,
+            "client_secret": settings.GITHUB_OAUTH_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": settings.GITHUB_OAUTH_REDIRECT_URI,
+        }
+    ).encode("utf-8")
+    token_req = Request(
+        "https://github.com/login/oauth/access_token",
+        data=token_payload,
+        headers={"Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(token_req, timeout=10) as resp:
+            token_data = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"GitHub token exchange failed: {detail}") from exc
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub token exchange error: {exc.reason}") from exc
+
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="GitHub token exchange missing access_token")
+
+    user_req = Request(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {access_token}", "User-Agent": "vulcan-backend"},
+        method="GET",
+    )
+    try:
+        with urlopen(user_req, timeout=10) as resp:
+            userinfo = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"GitHub userinfo failed: {detail}") from exc
+    except URLError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub userinfo error: {exc.reason}") from exc
+
+    email = userinfo.get("email")
+    if not email:
+        emails_req = Request(
+            "https://api.github.com/user/emails",
+            headers={"Authorization": f"Bearer {access_token}", "User-Agent": "vulcan-backend"},
+            method="GET",
+        )
+        try:
+            with urlopen(emails_req, timeout=10) as resp:
+                emails = json.loads(resp.read().decode("utf-8"))
+            primary = next((e for e in emails if e.get("primary") and e.get("verified")), None)
+            email = primary.get("email") if primary else None
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise HTTPException(status_code=400, detail=f"GitHub emails lookup failed: {detail}") from exc
+        except URLError as exc:
+            raise HTTPException(status_code=502, detail=f"GitHub emails lookup error: {exc.reason}") from exc
+
+    if not email:
+        raise HTTPException(status_code=400, detail="GitHub user email not available")
+
+    full_name = userinfo.get("name") or userinfo.get("login")
+    github_id = str(userinfo.get("id"))
+
+    user = await auth_service.get_or_create_github_user(db, email, full_name, github_id)
+    token = auth_service.issue_token(user)
+
+    redirect_params = urlencode({"token": token["access_token"]})
+    redirect_url = f"{settings.FRONTEND_OAUTH_REDIRECT_URL}?{redirect_params}"
+    return RedirectResponse(redirect_url)
 
 
 @router.post("/forgot-password", response_model=Message)

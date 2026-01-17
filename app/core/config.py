@@ -40,5 +40,14 @@ class Settings(BaseSettings):
 
     SENDGRID_API_KEY: str = Field(default="")
 
+    GOOGLE_OAUTH_CLIENT_ID: str = Field(default="")
+    GOOGLE_OAUTH_CLIENT_SECRET: str = Field(default="")
+    GOOGLE_OAUTH_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/oauth/google/callback")
+    FRONTEND_OAUTH_REDIRECT_URL: str = Field(default="http://localhost:3000/oauth/callback")
+
+    GITHUB_OAUTH_CLIENT_ID: str = Field(default="")
+    GITHUB_OAUTH_CLIENT_SECRET: str = Field(default="")
+    GITHUB_OAUTH_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/oauth/github/callback")
+
 
 settings = Settings()

@@ -132,6 +132,82 @@ class AuthService:
             "created_at": user.get("created_at"),
         }
 
+    async def get_or_create_google_user(
+        self,
+        db: AsyncIOMotorDatabase,
+        email: str,
+        full_name: Optional[str],
+        google_sub: str,
+    ) -> dict:
+        user = await db.users.find_one({"email": email})
+        now = datetime.utcnow()
+        if user:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {
+                        "oauth_provider": "google",
+                        "oauth_sub": google_sub,
+                        "updated_at": now,
+                    }
+                },
+            )
+            user.update({"oauth_provider": "google", "oauth_sub": google_sub, "updated_at": now})
+            return user
+
+        user_doc = {
+            "email": email,
+            "hashed_password": None,
+            "full_name": full_name or None,
+            "role": UserRole.NORMAL.value,
+            "is_active": True,
+            "oauth_provider": "google",
+            "oauth_sub": google_sub,
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await db.users.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+        return user_doc
+
+    async def get_or_create_github_user(
+        self,
+        db: AsyncIOMotorDatabase,
+        email: str,
+        full_name: Optional[str],
+        github_id: str,
+    ) -> dict:
+        user = await db.users.find_one({"email": email})
+        now = datetime.utcnow()
+        if user:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {
+                        "oauth_provider": "github",
+                        "oauth_sub": github_id,
+                        "updated_at": now,
+                    }
+                },
+            )
+            user.update({"oauth_provider": "github", "oauth_sub": github_id, "updated_at": now})
+            return user
+
+        user_doc = {
+            "email": email,
+            "hashed_password": None,
+            "full_name": full_name or None,
+            "role": UserRole.NORMAL.value,
+            "is_active": True,
+            "oauth_provider": "github",
+            "oauth_sub": github_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+        result = await db.users.insert_one(user_doc)
+        user_doc["_id"] = result.inserted_id
+        return user_doc
+
     async def request_password_reset(self, db: AsyncIOMotorDatabase, email: str) -> None:
         user = await db.users.find_one({"email": email})
         if not user:
