@@ -10,3 +10,18 @@ class UserPublic(APIModel):
     role: UserRole
     is_active: bool
     is_superuser: bool = False
+
+
+class UserAdminRead(APIModel):
+    id: str
+    email: EmailStr
+    full_name: str | None = None
+    role: UserRole
+    is_active: bool
+    status: str
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class UserRoleUpdate(APIModel):
+    role: UserRole
