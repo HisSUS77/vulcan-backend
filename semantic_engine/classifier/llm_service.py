@@ -101,7 +101,7 @@ class LLMService:
                 from openai import AsyncOpenAI
                 self.client = AsyncOpenAI(
                     api_key=self.api_key,
-                    base_url=self.base_url or "https://models.inference.ai.azure.com"
+                    base_url=self.base_url or "https://models.github.ai/inference"
                 )
                 logger.info(f"GitHub Models initialized with {self.model}")
             elif self.provider == 'anthropic':

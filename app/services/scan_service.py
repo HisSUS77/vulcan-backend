@@ -207,7 +207,8 @@ class ScanService:
 
             try:
                 await self._append_logs(scan_id, ["[INFO] Building semantic graph..."])
-                result = await self.pipeline.analyze_code(
+                pipeline = get_pipeline(PipelineConfig(enable_llm=True))
+                result = await pipeline.analyze_code(
                     filename=filename,
                     code=code,
                     language=language,
@@ -320,6 +321,36 @@ class ScanService:
                     for path in files
                     if str(path.relative_to(repo_root)).replace("\\", "/") in allowed
                 ]
+            if not files:
+                duration = time.time() - start_time
+                summary = {
+                    "scan_id": scan_id,
+                    "status": "FAILED",
+                    "input_type": "REPOSITORY",
+                    "total_files": 0,
+                    "files_scanned": 0,
+                    "vulnerabilities_found": 0,
+                    "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+                    "duration_seconds": round(duration, 2),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "error": "No scannable files found for the selected scope.",
+                }
+                await self._update_scan(
+                    scan_id,
+                    {
+                        "state": "FAILED",
+                        "progress": 100,
+                        "finished_at": datetime.utcnow().isoformat(),
+                        "summary": summary,
+                        "vulnerabilities": [],
+                        "files_scanned": 0,
+                        "total_files": 0,
+                        "graph_data": None,
+                    },
+                    ["[ERROR] No scannable files matched the selected scope."],
+                )
+                return
             await self._update_scan(scan_id, {"total_files": len(files), "progress": 20})
 
             vulnerabilities: list[dict] = []
@@ -344,7 +375,8 @@ class ScanService:
                 )
                 try:
                     code = file_path.read_text(encoding="utf-8", errors="ignore")
-                    result = await self.pipeline.analyze_code(
+                    pipeline = get_pipeline(PipelineConfig(enable_llm=True))
+                    result = await pipeline.analyze_code(
                         filename=rel_path,
                         code=code,
                         language=language,

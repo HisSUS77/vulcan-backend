@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class PipelineConfig:
     """Configuration for semantic analysis pipeline."""
-    enable_llm: bool = True  # LLM enabled by default
+    enable_llm: Optional[bool] = None  # None means: read from env
     max_graph_nodes: int = 200_000
     max_path_length: int = 50
     max_paths_per_rule: int = 100
@@ -35,11 +35,14 @@ class PipelineConfig:
     
     def __post_init__(self):
         """Load enable_llm from environment if not explicitly set."""
-        env_enable = os.getenv('ENABLE_LLM', 'true').lower()
-        if env_enable in ['true', '1', 'yes']:
-            self.enable_llm = True
-        elif env_enable in ['false', '0', 'no']:
-            self.enable_llm = False
+        if self.enable_llm is None:
+            env_enable = os.getenv('ENABLE_LLM', 'true').lower()
+            if env_enable in ['true', '1', 'yes']:
+                self.enable_llm = True
+            elif env_enable in ['false', '0', 'no']:
+                self.enable_llm = False
+            else:
+                self.enable_llm = True
 
 
 @dataclass
@@ -441,5 +444,8 @@ def get_pipeline(config: Optional[PipelineConfig] = None) -> SemanticPipeline:
     
     if _pipeline_instance is None:
         _pipeline_instance = SemanticPipeline(config)
+    elif config is not None:
+        if _pipeline_instance.config.enable_llm != config.enable_llm:
+            _pipeline_instance = SemanticPipeline(config)
     
     return _pipeline_instance
