@@ -60,22 +60,57 @@ class GraphService:
                 "detail": "Graph data was not stored during scan. This may be an older scan."
             }
         
+        selected_graph = graph_data
+        file_info = None
+        if isinstance(graph_data, dict) and "files" in graph_data:
+            files = graph_data.get("files") or {}
+            file_order = graph_data.get("file_order") or list(files.keys())
+            file_map = graph_data.get("file_map") or {}
+            target_id = file_id if file_id in files else None
+            if not target_id and file_id == "main" and file_order:
+                target_id = file_order[0]
+            if not target_id and file_order:
+                target_id = file_order[0]
+            if target_id:
+                selected_graph = files.get(target_id)
+                file_info = {
+                    "file_id": target_id,
+                    "file_path": file_map.get(target_id),
+                    "available_files": [
+                        {"id": key, "path": file_map.get(key)} for key in file_order
+                    ],
+                }
+            else:
+                selected_graph = None
+
+        if not selected_graph:
+            return {
+                "type": gtype.upper(),
+                "nodes": [],
+                "edges": [],
+                "error": "No graph data available",
+                "detail": "No graph data available for this file.",
+            }
+
         # Return requested graph type
         graph_type = gtype.upper()
         
         if graph_type == "AST":
-            return self._format_ast_graph(graph_data)
+            response = self._format_ast_graph(selected_graph)
         elif graph_type == "CFG":
-            return self._format_cfg_graph(graph_data)
+            response = self._format_cfg_graph(selected_graph)
         elif graph_type == "DFG":
-            return self._format_dfg_graph(graph_data)
+            response = self._format_dfg_graph(selected_graph)
         elif graph_type == "CPG":
-            return self._format_cpg_graph(graph_data)
+            response = self._format_cpg_graph(selected_graph)
         else:
             return {
                 "error": "Unsupported graph type",
                 "detail": f"Graph type '{gtype}' not supported. Use AST, CFG, DFG, or CPG."
             }
+        if file_info:
+            response["file"] = file_info
+        return response
     
     def _format_ast_graph(self, graph_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format AST graph for visualization."""

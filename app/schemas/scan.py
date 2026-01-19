@@ -27,6 +27,10 @@ class ScanStart(APIModel):
     # Repository scan fields
     repo_id: Optional[int] = Field(None, description="Repository ID from database")
     branch: Optional[str] = Field("main", description="Git branch to scan")
+    file_paths: Optional[list[str]] = Field(
+        None,
+        description="Optional list of repository file paths to scan (relative to repo root)",
+    )
     
     # Common fields
     scan_mode: ScanMode = Field(ScanMode.DEEP, description="Scan depth/mode")
@@ -49,6 +53,16 @@ class ScanStart(APIModel):
             raise ValueError("Provide either 'code' or 'repo_id', not both")
         if not code and not v:
             raise ValueError("Either 'code' or 'repo_id' must be provided")
+        return v
+
+    @field_validator('file_paths')
+    @classmethod
+    def validate_file_paths_for_repo(cls, v, info):
+        if v:
+            if info.data.get('code'):
+                raise ValueError("'file_paths' cannot be used with direct code scans")
+            if not info.data.get('repo_id'):
+                raise ValueError("'file_paths' requires 'repo_id'")
         return v
     
     @field_validator('language')
@@ -97,3 +111,4 @@ class ScanSummary(APIModel):
     created_at: str
     completed_at: Optional[str] = None
     vulnerabilities: Optional[list] = None  # Add vulnerabilities list
+    scanned_files: Optional[list[str]] = None

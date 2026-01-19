@@ -49,5 +49,7 @@ class Settings(BaseSettings):
     GITHUB_OAUTH_CLIENT_SECRET: str = Field(default="")
     GITHUB_OAUTH_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/oauth/github/callback")
 
+    REPO_STORAGE_DIR: str = Field(default="repo_uploads")
+
 
 settings = Settings()

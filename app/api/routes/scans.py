@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.mongo import get_mongo_db
+from app.api.deps import get_db
 from app.enums.role import UserRole
 from app.schemas.scan import ScanStart, ScanResponse, ScanStatusRead, ScanSummary
 from app.services.scan_service import ScanService
+from app.services.repository_service import RepositoryService
 from app.core.permissions import can_access_resource
 from app.core.exceptions import AuthorizationException, ResourceNotFoundException
 from datetime import datetime
@@ -18,6 +21,7 @@ async def start_scan(
     payload: ScanStart,
     user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    session: AsyncSession = Depends(get_db),
 ):
     """
     Start a vulnerability scan with dual input modes.
@@ -38,6 +42,16 @@ async def start_scan(
     """
     try:
         service = ScanService(db)
+        repo_url = None
+        repo_provider = None
+        repo_token = None
+        if payload.repo_id:
+            repo_service = RepositoryService()
+            repo = await repo_service.get(session, payload.repo_id)
+            repo_url = repo.url
+            repo_provider = repo.provider
+            repo_token = repo.access_token
+
         scan_id, input_type = await service.start(
             user_id=user["id"],
             code=payload.code,
@@ -45,7 +59,11 @@ async def start_scan(
             filename=payload.filename,
             repo_id=payload.repo_id,
             branch=payload.branch,
-            scan_mode=payload.scan_mode.value
+            scan_mode=payload.scan_mode.value,
+            repo_url=repo_url,
+            repo_provider=repo_provider,
+            repo_token=repo_token,
+            file_paths=payload.file_paths,
         )
         
         return ScanResponse(
