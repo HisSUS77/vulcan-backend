@@ -7,6 +7,7 @@ class UserPublic(APIModel):
     id: str
     email: EmailStr
     full_name: str | None = None
+    avatar_url: str | None = None
     role: UserRole
     is_active: bool
     is_superuser: bool = False
@@ -16,6 +17,7 @@ class UserAdminRead(APIModel):
     id: str
     email: EmailStr
     full_name: str | None = None
+    avatar_url: str | None = None
     role: UserRole
     is_active: bool
     status: str
@@ -25,3 +27,8 @@ class UserAdminRead(APIModel):
 
 class UserRoleUpdate(APIModel):
     role: UserRole
+
+
+class UserProfileUpdate(APIModel):
+    full_name: str | None = None
+    avatar_url: str | None = None

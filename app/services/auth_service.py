@@ -126,6 +126,7 @@ class AuthService:
             "id": str(user["_id"]),
             "email": user.get("email"),
             "full_name": user.get("full_name"),
+            "avatar_url": user.get("avatar_url"),
             "role": role,
             "is_active": user.get("is_active", True),
             "is_superuser": role == UserRole.ADMIN.value,

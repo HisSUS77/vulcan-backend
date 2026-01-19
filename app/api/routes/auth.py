@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
@@ -7,7 +8,7 @@ import json
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import get_current_user
-from app.db.mongo import get_mongo_db
+from app.db.mongo import get_mongo_db, to_object_id
 from app.schemas.auth import (
     UserCreate,
     UserLogin,
@@ -19,7 +20,7 @@ from app.schemas.auth import (
     PasswordResetValidation,
     Message,
 )
-from app.schemas.user import UserPublic
+from app.schemas.user import UserPublic, UserProfileUpdate
 from app.services.auth_service import AuthService
 from app.core.exceptions import ConflictException, AuthenticationException
 from app.core.config import settings
@@ -82,6 +83,29 @@ async def me(user=Depends(get_current_user)):
     Get current authenticated user profile.
     """
     return user
+
+
+@router.patch("/me", response_model=UserPublic)
+async def update_me(
+    payload: UserProfileUpdate,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    updates = {}
+    if payload.full_name is not None:
+        updates["full_name"] = payload.full_name.strip() or None
+    if payload.avatar_url is not None:
+        updates["avatar_url"] = payload.avatar_url or None
+    if not updates:
+        return user
+
+    updates["updated_at"] = datetime.utcnow()
+    object_id = to_object_id(user.get("id", ""))
+    if not object_id:
+        raise HTTPException(status_code=400, detail="Invalid user id")
+    await db.users.update_one({"_id": object_id}, {"$set": updates})
+    updated = await db.users.find_one({"_id": object_id})
+    return auth_service.to_public(updated)
 
 
 @router.post("/refresh", response_model=Token)
