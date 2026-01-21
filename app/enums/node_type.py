@@ -18,6 +18,34 @@ class NodeType(str, Enum):
     BINARY_OP = "BinaryOperation"
     IDENTIFIER = "Identifier"
     
+    # Security-critical imports (UPDATED)
+    IMPORT = "Import"
+    
+    # Async/await (NEW)
+    ASYNC_FUNCTION = "AsyncFunction"
+    AWAIT = "Await"
+    
+    # Lambda functions (NEW)
+    LAMBDA = "Lambda"
+    
+    # Comprehensions (NEW)
+    LIST_COMP = "ListComp"
+    DICT_COMP = "DictComp"
+    SET_COMP = "SetComp"
+    GENERATOR_EXP = "GeneratorExp"
+    
+    # Exception handling (NEW)
+    TRY = "Try"
+    EXCEPT = "Except"
+    RAISE = "Raise"
+    
+    # Scope declarations (NEW)
+    GLOBAL = "Global"
+    NONLOCAL = "Nonlocal"
+    
+    # Attributes (NEW)
+    ATTRIBUTE = "Attribute"
+    
     # Control flow
     IF_STATEMENT = "IfStatement"
     FOR_STATEMENT = "ForStatement"
@@ -29,7 +57,6 @@ class NodeType(str, Enum):
     CALL_EXPRESSION = "CallExpression"
     ATTRIBUTE_ACCESS = "AttributeAccess"
     SUBSCRIPT = "Subscript"                  # Array/dict subscript like arr[i] or sys.argv[1]
-    IMPORT = "Import"
     LITERAL = "Literal"
     
     # String operations (NEW - for injection detection)
@@ -67,7 +94,6 @@ class NodeType(str, Enum):
     JSX_ELEMENT = "JSXElement"
     TS_INTERFACE = "TSInterface"
     ARROW_FUNCTION = "ArrowFunction"
-    ASYNC_FUNCTION = "AsyncFunction"
     PROMISE = "Promise"
     
     # External calls

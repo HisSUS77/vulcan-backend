@@ -10,9 +10,6 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, asdict
 
 from app.schemas.graph import SemanticGraph
-from app.domain.analysis.ast_parser import ASTParser
-from app.domain.analysis.cfg_builder import CFGBuilder
-from app.domain.analysis.dfg_builder import DFGBuilder
 from app.domain.analysis.semantic_graph_builder import SemanticGraphBuilder
 
 from semantic_engine.query_store.loader import get_query_store, QueryRule

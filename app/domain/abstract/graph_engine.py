@@ -1,6 +1,5 @@
-'// lets yoy defineintrfaces without implementation'
+'// lets you define interfaces without implementation'
 from typing import Protocol, Any
-'// lets yoy defineintrfaces without implementation'
 
 class GraphEngine(Protocol):
     def build_ast(self, scan_id: str, file_id: str) -> dict[str, Any]:

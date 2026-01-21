@@ -38,7 +38,7 @@ class LLMClassificationResult(BaseModel):
 class LLMService:
     """
     LLM integration service supporting multiple providers.
-    Handles API calls, retries, and response parsing.
+    Handles API calls, retries, and response parsing with automatic fallbacks.
     """
     
     def __init__(
@@ -50,7 +50,7 @@ class LLMService:
         timeout: int = 15
     ):
         """
-        Initialize LLM service.
+        Initialize LLM service with fallback support.
         
         Args:
             provider: LLM provider ('openai', 'anthropic', 'groq', 'github')
@@ -59,20 +59,25 @@ class LLMService:
             base_url: Base URL for API (for GitHub Models)
             timeout: Request timeout in seconds
         """
-        self.provider = provider or os.getenv('LLM_PROVIDER', 'openai')
+        self.provider = provider or os.getenv('LLM_PROVIDER', 'github')
         self.api_key = api_key or os.getenv('LLM_API_KEY')
-        self.model = model or os.getenv('LLM_MODEL_CLASSIFIER', 'gpt-4')
+        self.model = model or os.getenv('LLM_MODEL_CLASSIFIER', 'meta/Llama-4-Scout-17B-16E-Instruct')
         self.base_url = base_url or os.getenv('LLM_BASE_URL')
         self.timeout = timeout
         
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
         
-        if not self.api_key:
+        # Initialize fallback providers
+        self.fallback_providers = []
+        self._setup_fallbacks()
+        
+        if not self.api_key and not self.fallback_providers:
             logger.warning("No LLM_API_KEY provided - LLM classification disabled")
         
         # Initialize client
         self.client = None
+        self.current_provider = self.provider
         if self.api_key:
             self._init_client()
     
@@ -90,30 +95,84 @@ class LLMService:
             logger.error(f"Failed to load system prompt: {e}")
             return "You are a security vulnerability analyzer."
     
-    def _init_client(self):
+    def _setup_fallbacks(self):
+        """Setup fallback providers in priority order."""
+        # Groq as primary fallback (fast and reliable)
+        groq_key = os.getenv('GROQ_API_KEY')
+        if groq_key and self.provider != 'groq':
+            self.fallback_providers.append({
+                'provider': 'groq',
+                'api_key': groq_key,
+                'model': 'llama-3.3-70b-versatile',
+                'base_url': None
+            })
+            logger.info("Groq configured as fallback provider")
+        
+        # OpenAI as secondary fallback
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key and self.provider != 'openai':
+            self.fallback_providers.append({
+                'provider': 'openai',
+                'api_key': openai_key,
+                'model': 'gpt-4o-mini',
+                'base_url': None
+            })
+            logger.info("OpenAI configured as fallback provider")
+        
+        # Anthropic as tertiary fallback
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        if anthropic_key and self.provider != 'anthropic':
+            self.fallback_providers.append({
+                'provider': 'anthropic',
+                'api_key': anthropic_key,
+                'model': 'claude-3-haiku-20240307',
+                'base_url': None
+            })
+            logger.info("Anthropic configured as fallback provider")
+    
+    def _init_client(self, fallback_config: Optional[Dict[str, Any]] = None):
         """Initialize provider-specific client."""
         try:
-            if self.provider == 'openai':
+            # Use fallback config if provided
+            if fallback_config:
+                provider = fallback_config['provider']
+                api_key = fallback_config['api_key']
+                base_url = fallback_config.get('base_url')
+                model = fallback_config.get('model')
+                self.current_provider = provider
+                self.model = model
+            else:
+                provider = self.provider
+                api_key = self.api_key
+                base_url = self.base_url
+            
+            if provider == 'openai':
                 from openai import AsyncOpenAI
-                self.client = AsyncOpenAI(api_key=self.api_key)
-            elif self.provider == 'github':
+                self.client = AsyncOpenAI(api_key=api_key)
+                logger.info(f"Initialized OpenAI client with model {self.model}")
+            elif provider == 'github':
                 # GitHub Models uses OpenAI-compatible API
                 from openai import AsyncOpenAI
                 self.client = AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url or "https://models.github.ai/inference"
+                    api_key=api_key,
+                    base_url=base_url or "https://models.github.ai/inference"
                 )
-                logger.info(f"GitHub Models initialized with {self.model}")
-            elif self.provider == 'anthropic':
+                logger.info(f"Initialized GitHub Models with {self.model}")
+            elif provider == 'anthropic':
                 from anthropic import AsyncAnthropic
-                self.client = AsyncAnthropic(api_key=self.api_key)
-            elif self.provider == 'groq':
+                self.client = AsyncAnthropic(api_key=api_key)
+                logger.info(f"Initialized Anthropic client with model {self.model}")
+            elif provider == 'groq':
                 from groq import AsyncGroq
-                self.client = AsyncGroq(api_key=self.api_key)
+                self.client = AsyncGroq(api_key=api_key)
+                logger.info(f"Initialized Groq client with model {self.model}")
             else:
-                logger.error(f"Unsupported LLM provider: {self.provider}")
+                logger.error(f"Unsupported LLM provider: {provider}")
         except ImportError as e:
-            logger.error(f"Failed to import {self.provider} library: {e}")
+            logger.error(f"Failed to import {provider} library: {e}")
+            self.client = None
+        except Exception as e:
+            logger.error(f"Failed to initialize {provider} client: {e}")
             self.client = None
     
     async def classify_code_slice(
@@ -127,7 +186,7 @@ class LLMService:
         cwe: Optional[str]
     ) -> LLMClassificationResult:
         """
-        Classify a code slice for vulnerability.
+        Classify a code slice for vulnerability with automatic fallback.
         
         Args:
             code_snippet: Code to analyze
@@ -142,8 +201,11 @@ class LLMService:
             LLMClassificationResult with classification and details
         """
         if not self.client:
-            logger.warning("LLM client not initialized, using fallback classification")
-            return self._get_fallback_result()
+            logger.warning("LLM client not initialized, trying fallbacks...")
+            return await self._try_fallbacks(
+                code_snippet, rule_name, rule_description,
+                source_label, sink_label, owasp, cwe
+            )
         
         # Build prompt
         prompt = self._build_classification_prompt(
@@ -153,6 +215,7 @@ class LLMService:
         
         try:
             # Call LLM with timeout
+            logger.info(f"Calling {self.current_provider} for vulnerability classification...")
             response = await asyncio.wait_for(
                 self._call_llm(prompt),
                 timeout=self.timeout
@@ -160,14 +223,67 @@ class LLMService:
             
             # Parse response
             result = self._parse_response(response, rule_name, owasp, cwe)
+            logger.info(f"{self.current_provider} classification: {result.classification}")
             return result
             
         except asyncio.TimeoutError:
-            logger.error(f"LLM request timeout after {self.timeout}s")
-            return self._get_fallback_result()
+            logger.error(f"{self.current_provider} request timeout after {self.timeout}s, trying fallbacks...")
+            return await self._try_fallbacks(
+                code_snippet, rule_name, rule_description,
+                source_label, sink_label, owasp, cwe
+            )
         except Exception as e:
-            logger.error(f"LLM classification failed: {e}")
-            return self._get_fallback_result()
+            logger.error(f"{self.current_provider} classification failed: {e}, trying fallbacks...")
+            return await self._try_fallbacks(
+                code_snippet, rule_name, rule_description,
+                source_label, sink_label, owasp, cwe
+            )
+    
+    async def _try_fallbacks(
+        self,
+        code_snippet: str,
+        rule_name: str,
+        rule_description: str,
+        source_label: str,
+        sink_label: str,
+        owasp: str,
+        cwe: Optional[str]
+    ) -> LLMClassificationResult:
+        """Try fallback providers in order."""
+        for fallback in self.fallback_providers:
+            try:
+                logger.info(f"Trying fallback provider: {fallback['provider']}")
+                
+                # Initialize fallback client
+                self._init_client(fallback)
+                
+                if not self.client:
+                    continue
+                
+                # Build prompt
+                prompt = self._build_classification_prompt(
+                    code_snippet, rule_name, rule_description,
+                    source_label, sink_label, owasp, cwe
+                )
+                
+                # Call LLM with timeout
+                response = await asyncio.wait_for(
+                    self._call_llm(prompt),
+                    timeout=self.timeout
+                )
+                
+                # Parse response
+                result = self._parse_response(response, rule_name, owasp, cwe)
+                logger.info(f"Fallback {self.current_provider} succeeded: {result.classification}")
+                return result
+                
+            except Exception as e:
+                logger.error(f"Fallback {fallback['provider']} failed: {e}")
+                continue
+        
+        # All providers failed, return pattern-based result
+        logger.warning("All LLM providers failed, using pattern-based detection")
+        return self._get_fallback_result(rule_name, owasp, cwe)
     
     def _build_classification_prompt(
         self,
@@ -181,9 +297,12 @@ class LLMService:
     ) -> str:
         """Build classification prompt using Vulcan-LLM format."""
         
+        # Auto-detect language from code patterns
+        language = self._detect_language(code_snippet)
+        
         # Build context object as per system prompt format
         context = {
-            "language": "python",  # TODO: detect from code
+            "language": language,
             "framework": "FastAPI/Django/Generic",
             "source": source_label,
             "sink": sink_label,
@@ -221,6 +340,52 @@ Your task is to determine if this represents a real exploitable vulnerability.
 
 Be strict - only mark as vulnerable if the code is actually exploitable based on what you can see.
 """
+    
+    def _detect_language(self, code: str) -> str:
+        """
+        Auto-detect programming language from code patterns.
+        
+        Returns:
+            Language identifier ('python', 'javascript', 'typescript', etc.)
+        """
+        code_lower = code.lower()
+        
+        # JavaScript/TypeScript indicators
+        js_ts_patterns = [
+            'const ', 'let ', 'var ', '=>', 'function(',
+            'require(', 'import ', 'export ', 'async ',
+            'await ', '.then(', 'console.', 'document.'
+        ]
+        
+        # TypeScript specific
+        ts_patterns = [': string', ': number', ': boolean', 'interface ', 'type ']
+        
+        # Python indicators
+        python_patterns = [
+            'def ', 'import ', 'from ', 'class ', '__init__',
+            'self.', 'print(', 'if __name__', '"""', "'''", 
+            'async def', 'await '
+        ]
+        
+        # Count matches
+        js_ts_score = sum(1 for pattern in js_ts_patterns if pattern in code_lower)
+        ts_score = sum(1 for pattern in ts_patterns if pattern in code)
+        python_score = sum(1 for pattern in python_patterns if pattern in code_lower)
+        
+        # TypeScript detection (must have TS-specific patterns + JS patterns)
+        if ts_score > 0 and js_ts_score > 0:
+            return "typescript"
+        
+        # JavaScript detection
+        if js_ts_score > python_score and js_ts_score >= 2:
+            return "javascript"
+        
+        # Python detection (default)
+        if python_score >= js_ts_score or python_score >= 1:
+            return "python"
+        
+        # Default to python if unclear
+        return "python"
     
     async def _call_llm(self, prompt: str) -> str:
         """
