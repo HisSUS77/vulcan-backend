@@ -5,7 +5,8 @@ class EdgeType(str, Enum):
     # Structural
     AST_CHILD = "AST_CHILD"                  # Parent → Child in AST
     
-    # Control flow
+    # Control flow (CPG)
+    CONTROL_FLOW = "CONTROL_FLOW"            # Generic control flow edge
     CFG_NEXT = "CFG_NEXT"                    # Sequential execution
     CFG_BRANCH_TRUE = "CFG_BRANCH_TRUE"      # If condition true
     CFG_BRANCH_FALSE = "CFG_BRANCH_FALSE"    # If condition false
@@ -13,7 +14,8 @@ class EdgeType(str, Enum):
     CFG_LOOP_EXIT = "CFG_LOOP_EXIT"          # Loop end
     CFG_EXCEPTION = "CFG_EXCEPTION"          # Exception thrown
     
-    # Data flow
+    # Data flow (CPG)
+    DATA_FLOW = "DATA_FLOW"                  # Generic data flow edge
     DFG_FLOW = "DFG_FLOW"                    # General data flow
     DFG_INTERP = "DFG_INTERP"                # Variable → f-string/template literal
     DFG_TEMPLATE = "DFG_TEMPLATE"            # JS template literal interpolation

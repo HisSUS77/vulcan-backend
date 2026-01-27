@@ -56,8 +56,10 @@ class NodeType(str, Enum):
     # Expressions
     CALL_EXPRESSION = "CallExpression"
     ATTRIBUTE_ACCESS = "AttributeAccess"
+    MEMBER_ACCESS = "MemberAccess"           # JS/TS obj.prop.method chains
     SUBSCRIPT = "Subscript"                  # Array/dict subscript like arr[i] or sys.argv[1]
     LITERAL = "Literal"
+    EXPRESSION = "Expression"                # Generic expression
     
     # String operations (NEW - for injection detection)
     FSTRING = "FString"                      # Python f"...{var}..."
