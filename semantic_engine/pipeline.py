@@ -8,6 +8,7 @@ import time
 import logging
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, asdict
+from pathlib import Path
 
 from app.schemas.graph import SemanticGraph
 from app.domain.analysis.semantic_graph_builder import SemanticGraphBuilder
@@ -29,6 +30,9 @@ class PipelineConfig:
     query_timeout: int = 30  # seconds per query
     llm_timeout: int = 15  # seconds per LLM call
     enable_cycle_detection: bool = True
+    enable_path_discovery: bool = True
+    path_score_threshold: float = 0.35
+    max_candidate_paths: int = 200
     
     def __post_init__(self):
         """Load enable_llm from environment if not explicitly set."""
@@ -144,15 +148,23 @@ class SemanticPipeline:
             
             logger.info(f"Graph built: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
             
-            # Step 2: Execute security queries
-            all_slices = await self._execute_queries(graph, code)
-            logger.info(f"Query execution: {len(all_slices)} slices found")
+            # Step 2: Broad path discovery (primary)
+            all_slices = []
+            if self.config.enable_path_discovery:
+                discovery_slices = await self._discover_paths(graph, {filename: code})
+                all_slices.extend(discovery_slices)
+                logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
+
+            # Step 3: Execute security queries (augment discovery results)
+            query_slices = await self._execute_queries(graph, code)
+            all_slices.extend(query_slices)
+            logger.info(f"Query execution: {len(query_slices)} slices found")
             
-            # Step 3: Classify with LLM
+            # Step 4: Classify with LLM
             vulnerabilities = await self._classify_slices(all_slices)
             logger.info(f"Classification: {len(vulnerabilities)} vulnerabilities confirmed")
             
-            # Step 4: Build result
+            # Step 5: Build result
             analysis_time = time.time() - start_time
             
             # Serialize graph for visualization
@@ -222,7 +234,10 @@ class SemanticPipeline:
             return None
     
     async def _execute_queries(
-        self, graph: SemanticGraph, source_code: str
+        self,
+        graph: SemanticGraph,
+        source_code: str,
+        source_code_map: Optional[Dict[str, str]] = None
     ) -> List[CodeSlice]:
         """
         Execute all security queries against graph.
@@ -240,7 +255,7 @@ class SemanticPipeline:
         for query in queries:
             try:
                 slices = self.query_executor.execute_query(
-                    graph, query, source_code
+                    graph, query, source_code, source_code_map
                 )
                 all_slices.extend(slices)
             except Exception as e:
@@ -248,6 +263,102 @@ class SemanticPipeline:
                 continue
         
         return all_slices
+
+    async def _discover_paths(
+        self,
+        graph: SemanticGraph,
+        source_code_map: Dict[str, str]
+    ) -> List[CodeSlice]:
+        from semantic_engine.path_discovery import PathDiscovery
+        discovery = PathDiscovery(
+            max_depth=self.config.max_path_length,
+            max_candidates=self.config.max_candidate_paths,
+            score_threshold=self.config.path_score_threshold
+        )
+        return discovery.discover(graph, source_code_map, self.query_store)
+
+    async def analyze_repository(
+        self,
+        repo_path: str,
+        file_paths: Optional[list[str]] = None
+    ) -> AnalysisResult:
+        """
+        Analyze a repository with multi-file, interprocedural path discovery.
+        """
+        start_time = time.time()
+        warnings = []
+        errors = []
+        try:
+            from app.domain.analysis.multi_file_repo_graph import MultiFileRepositoryGraph
+            repo_graph = MultiFileRepositoryGraph(repo_path)
+            result = repo_graph.build()
+            graph = result["global_cpg"]
+
+            # Filter source map by selected files if provided
+            source_code_map: Dict[str, str] = {}
+            allowed = set((p or "").replace("\\", "/") for p in (file_paths or []))
+            for module in result["modules"]:
+                file_path = module.file_path
+                rel_path = file_path.replace("\\", "/")
+                if allowed and rel_path not in allowed:
+                    continue
+                try:
+                    source_code_map[file_path] = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+
+            # Broad path discovery
+            all_slices = []
+            if self.config.enable_path_discovery:
+                discovery_slices = await self._discover_paths(graph, source_code_map)
+                all_slices.extend(discovery_slices)
+                logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
+
+            # Always augment with rule-based queries (use concatenated source if needed)
+            concat_source = "\n".join(source_code_map.values()) if source_code_map else ""
+            query_slices = await self._execute_queries(graph, concat_source, source_code_map)
+            all_slices.extend(query_slices)
+            logger.info(f"Query execution: {len(query_slices)} slices found")
+
+            vulnerabilities = await self._classify_slices(all_slices)
+            analysis_time = time.time() - start_time
+
+            graph_data = self._serialize_graph(graph)
+            return AnalysisResult(
+                filename="repository",
+                language="multi",
+                lines_of_code=sum(len(code.splitlines()) for code in source_code_map.values()),
+                analysis_time_seconds=round(analysis_time, 2),
+                graph_nodes=len(graph.nodes),
+                graph_edges=len(graph.edges),
+                rules_executed=len(self.query_store.get_all_queries()),
+                slices_found=len(all_slices),
+                vulnerabilities_found=len(vulnerabilities),
+                vulnerabilities=[self._format_vulnerability(v) for v in vulnerabilities],
+                graph_data=graph_data,
+                warnings=warnings,
+                errors=errors,
+                success=True
+            )
+        except Exception as e:
+            logger.error(f"Repository analysis failed: {e}", exc_info=True)
+            return self._create_error_result(
+                "repository", "multi", "", warnings, [str(e)]
+            )
+
+    def build_graph_data(
+        self,
+        code: str,
+        language: str = "python",
+        filename: str = "input"
+    ) -> Optional[Dict[str, Any]]:
+        """Build and serialize graph data without running queries/LLM."""
+        try:
+            builder = SemanticGraphBuilder(language=language)
+            graph = builder.build(code, filename=filename)
+            return self._serialize_graph(graph)
+        except Exception:
+            return None
     
     async def _classify_slices(
         self, slices: List[CodeSlice]

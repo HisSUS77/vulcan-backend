@@ -65,7 +65,8 @@ class QueryExecutor:
         self,
         graph: SemanticGraph,
         query: QueryRule,
-        source_code: str
+        source_code: str,
+        source_code_map: Optional[Dict[str, str]] = None
     ) -> List[CodeSlice]:
         """
         Execute a single query rule against the graph.
@@ -80,15 +81,22 @@ class QueryExecutor:
         """
         logger.debug(f"Executing query: {query.rule_id}")
         
+        # Regex/setting-based rules (no source/sink required)
+        regex_slices = self._execute_regex_patterns(query, source_code, source_code_map)
+
         # Step 1: Resolve source nodes
         source_nodes = self._resolve_sources(graph, query)
         if not source_nodes:
+            if regex_slices:
+                return regex_slices
             logger.debug(f"No source nodes found for {query.rule_id}")
             return []
         
         # Step 2: Resolve sink nodes
         sink_nodes = self._resolve_sinks(graph, query)
         if not sink_nodes:
+            if regex_slices:
+                return regex_slices
             logger.debug(f"No sink nodes found for {query.rule_id}")
             return []
         
@@ -97,6 +105,10 @@ class QueryExecutor:
         # Step 3: Find paths based on pattern type
         slices = []
         for pattern in query.patterns:
+            # Guard-aware patterns (e.g., "DFG_FLOW AND NOT exists(auth_check)")
+            if "AND NOT exists" in pattern and query.required_guards:
+                if self._has_required_guards(graph, query.required_guards):
+                    continue
             paths = self._find_paths(
                 graph, source_nodes, sink_nodes, pattern, query
             )
@@ -104,16 +116,87 @@ class QueryExecutor:
             # Step 4: Extract slices from paths
             for path in paths[:self.max_paths_per_rule]:
                 slice_obj = self._extract_slice(
-                    graph, path, query, pattern, source_code
+                    graph, path, query, pattern, source_code, source_code_map
                 )
                 if slice_obj:
                     slices.append(slice_obj)
         
         # Step 5: Deduplicate and rank
-        slices = self._deduplicate_slices(slices)
+        slices = self._deduplicate_slices(slices + regex_slices)
         
         logger.info(f"Query {query.rule_id}: found {len(slices)} potential issues")
         return slices
+
+    def _execute_regex_patterns(
+        self,
+        query: QueryRule,
+        source_code: str,
+        source_code_map: Optional[Dict[str, str]]
+    ) -> List[CodeSlice]:
+        """Execute regex/dangerous-setting based rules."""
+        patterns = list(query.regex_patterns or [])
+        patterns += list(query.dangerous_settings or [])
+        patterns += list(query.dangerous_values or [])
+        # Support simple pattern tokens like CALL(md5), ASSIGNMENT(debug)
+        for p in query.patterns:
+            if p.startswith("CALL(") and p.endswith(")"):
+                token = p[len("CALL("):-1]
+                patterns.append(rf"{token}\\s*\\(")
+            if p.startswith("ASSIGNMENT(") and p.endswith(")"):
+                token = p[len("ASSIGNMENT("):-1]
+                patterns.append(rf"{token}\\s*=\\s*")
+            if p.startswith("LITERAL(") and p.endswith(")"):
+                token = p[len("LITERAL("):-1]
+                patterns.append(rf"['\\\"]{token}['\\\"]")
+
+        if not patterns:
+            return []
+
+        files = {"input": source_code}
+        if source_code_map:
+            files = source_code_map
+
+        slices: List[CodeSlice] = []
+        for file_path, code in files.items():
+            lines = code.split("\n")
+            for pattern in patterns:
+                try:
+                    for match in re.finditer(pattern, code):
+                        line_num = code[:match.start()].count("\n") + 1
+                        snippet = self._extract_code_snippet(code, {line_num}, context=2)
+                        slice_id = f"{query.rule_id}_REGEX_{file_path}_{line_num}"
+                        slices.append(CodeSlice(
+                            slice_id=slice_id,
+                            rule_id=query.rule_id,
+                            rule_name=query.name,
+                            owasp=query.owasp,
+                            cwe=query.cwe,
+                            severity=query.severity,
+                            confidence=query.confidence,
+                            source_node_id="regex_source",
+                            sink_node_id="regex_sink",
+                            path_nodes=[],
+                            code_snippet=snippet,
+                            location={"file": file_path, "start_line": line_num, "end_line": line_num},
+                            source_label="regex",
+                            sink_label="regex",
+                            pattern_type="REGEX",
+                            reason=f"Matched regex pattern: {pattern}"
+                        ))
+                except re.error:
+                    continue
+
+        return slices
+
+    def _has_required_guards(self, graph: SemanticGraph, guards: List[str]) -> bool:
+        """Return True if guard patterns are found in the graph."""
+        guard_set = {g.lower() for g in guards}
+        for node in graph.nodes:
+            label = (node.name or node.id or "").lower()
+            code = (node.source_code or "").lower()
+            if any(g in label or g in code for g in guard_set):
+                return True
+        return False
     
     def _resolve_sources(
         self, graph: SemanticGraph, query: QueryRule
@@ -252,23 +335,26 @@ class QueryExecutor:
     
     def _get_edge_types_for_pattern(self, pattern_type: str) -> List[EdgeType]:
         """Map pattern type to edge types."""
-        if pattern_type == "DFG_FLOW":
+        if "DFG_FLOW" in pattern_type:
             return [
                 EdgeType.DFG_FLOW, 
                 EdgeType.TAINT_FLOW, 
                 EdgeType.DFG_INTERP,      # Variable → f-string/template
                 EdgeType.DFG_PARAM_PASS,  # Argument → parameter
                 EdgeType.DFG_RET,         # Return → caller
-                EdgeType.DFG_ATTR         # Object → attribute
+                EdgeType.DFG_ATTR,        # Object → attribute
+                EdgeType.DATA_FLOW,
+                EdgeType.CALL_GRAPH,
+                EdgeType.DFG_TEMPLATE
             ]
-        elif pattern_type == "TAINT_FLOW":
+        elif "TAINT_FLOW" in pattern_type:
             return [
                 EdgeType.TAINT_FLOW, 
                 EdgeType.DFG_FLOW,
                 EdgeType.DFG_INTERP,
                 EdgeType.DFG_PARAM_PASS
             ]
-        elif pattern_type == "CFG_NEXT":
+        elif "CFG_NEXT" in pattern_type:
             return [EdgeType.CFG_NEXT]
         elif pattern_type == "ANY":
             return [
@@ -342,11 +428,7 @@ class QueryExecutor:
                 if neighbor in path:  # Avoid cycles
                     continue
                 
-                # Check if neighbor is a sanitizer
-                if neighbor in node_map:
-                    neighbor_node = node_map[neighbor]
-                    if self._is_sanitizer(neighbor_node, sanitizers):
-                        continue  # Skip sanitized paths
+                # Do not skip sanitizers; handle in slice confidence
                 
                 new_path = path + [neighbor]
                 path_key = tuple(new_path)
@@ -371,7 +453,8 @@ class QueryExecutor:
         path: List[str],
         query: QueryRule,
         pattern_type: str,
-        source_code: str
+        source_code: str,
+        source_code_map: Optional[Dict[str, str]] = None
     ) -> Optional[CodeSlice]:
         """
         Extract minimal code slice from path.
@@ -412,25 +495,38 @@ class QueryExecutor:
             if hasattr(sink_node, 'line') and sink_node.line:
                 line_numbers.add(sink_node.line)
         
-        # Extract code snippet with context (±3 lines)
-        snippet = self._extract_code_snippet(source_code, line_numbers, context=3)
+        # Determine file for snippet extraction
+        file_path = (source_node.file or sink_node.file or "input")
+        file_source = source_code
+        if source_code_map and file_path in source_code_map:
+            file_source = source_code_map[file_path]
+
+        # Extract code snippet with context (+/-3 lines)
+        snippet = self._extract_code_snippet(file_source, line_numbers, context=3)
         
         # Determine location
         min_line = min(line_numbers) if line_numbers else 1
         max_line = max(line_numbers) if line_numbers else 1
         
         location = {
-            "file": "input",  # Will be filled by caller
+            "file": file_path,
             "start_line": min_line,
             "end_line": max_line
         }
         
         # Generate reason
+        sanitizer_hits = self._count_sanitizers_in_path(path, graph, set(query.sanitizers))
         reason = self._generate_reason(source_node, sink_node, query, pattern_type)
+        if sanitizer_hits:
+            reason += f" Sanitizers observed: {sanitizer_hits}."
         
         # Create slice
         slice_id = f"{query.rule_id}_{source_node.id}_{sink_node.id}"
         
+        confidence = query.confidence
+        if sanitizer_hits:
+            confidence = "low"
+
         return CodeSlice(
             slice_id=slice_id,
             rule_id=query.rule_id,
@@ -438,7 +534,7 @@ class QueryExecutor:
             owasp=query.owasp,
             cwe=query.cwe,
             severity=query.severity,
-            confidence=query.confidence,
+            confidence=confidence,
             source_node_id=source_node.id,
             sink_node_id=sink_node.id,
             path_nodes=path,
@@ -449,6 +545,22 @@ class QueryExecutor:
             pattern_type=pattern_type,
             reason=reason
         )
+
+    def _count_sanitizers_in_path(
+        self,
+        path: List[str],
+        graph: SemanticGraph,
+        sanitizers: Set[str]
+    ) -> int:
+        node_map = {n.id: n for n in graph.nodes}
+        hits = 0
+        for node_id in path:
+            node = node_map.get(node_id)
+            if not node:
+                continue
+            if self._is_sanitizer(node, sanitizers):
+                hits += 1
+        return hits
     
     def _extract_code_snippet(
         self, source_code: str, line_numbers: Set[int], context: int = 3

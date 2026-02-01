@@ -5,9 +5,11 @@
 __pycache__/
 *.pyc
 *.cpython-313.pyc
+*venv
 
 # Local database
 vulcan.db
+.vulcan_cache/
 
 # OS generated files
 .DS_Store

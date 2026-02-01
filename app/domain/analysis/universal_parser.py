@@ -174,16 +174,18 @@ class UniversalParser:
         
         for lang_type, lang_name in language_configs.items():
             try:
-                # Look for language.so file
+                # Look for language.so or language.dll (Windows)
                 so_file = self.grammar_path / f"{lang_name}.so"
+                dll_file = self.grammar_path / f"{lang_name}.dll"
+                grammar_file = so_file if so_file.exists() else dll_file if dll_file.exists() else None
                 
-                if not so_file.exists():
-                    logger.warning(f"Grammar file not found: {so_file}")
+                if not grammar_file:
+                    logger.warning(f"Grammar file not found: {so_file} or {dll_file}")
                     logger.warning(f"Skipping {lang_name} support")
                     continue
                 
                 # Load the language
-                language = Language(str(so_file), lang_name)
+                language = Language(str(grammar_file), lang_name)
                 self.languages[lang_type] = language
                 
                 # Create parser

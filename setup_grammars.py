@@ -169,26 +169,28 @@ def build_grammars(base_dir: Path, output_dir: Path):
 
 
 def verify_build(output_dir: Path):
-    """Verify that all .so files were created"""
+    """Verify that all grammar files were created (.so or .dll)."""
     logger.info("\nVerifying build...")
     
     expected_files = [
-        "python.so",
-        "javascript.so",
-        "typescript.so",
-        "html.so",
-        "json.so",
-        "yaml.so",
+        "python",
+        "javascript",
+        "typescript",
+        "html",
+        "json",
+        "yaml",
     ]
     
     all_ok = True
-    for filename in expected_files:
-        filepath = output_dir / filename
-        if filepath.exists():
-            size = filepath.stat().st_size
-            logger.info(f"✓ {filename} ({size:,} bytes)")
+    for name in expected_files:
+        so_path = output_dir / f"{name}.so"
+        dll_path = output_dir / f"{name}.dll"
+        if so_path.exists() or dll_path.exists():
+            path = so_path if so_path.exists() else dll_path
+            size = path.stat().st_size
+            logger.info(f"??? {path.name} ({size:,} bytes)")
         else:
-            logger.error(f"✗ {filename} not found")
+            logger.error(f"??? {name}.so/.dll not found")
             all_ok = False
     
     return all_ok

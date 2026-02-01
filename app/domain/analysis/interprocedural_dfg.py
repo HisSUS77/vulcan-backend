@@ -36,6 +36,8 @@ class DFGEdgeType(str, Enum):
     DFG_RET = "DFG_RET"                   # Return value → Call site
     DFG_CLOSURE = "DFG_CLOSURE"           # Closure capture
     DFG_CALLBACK = "DFG_CALLBACK"         # Callback invocation
+    DFG_IMPORT = "DFG_IMPORT"             # Import -> Export linkage
+    DFG_EXPORT = "DFG_EXPORT"             # Export -> Import usage
     
     # Python-specific
     DFG_TUPLE_UNPACK = "DFG_TUPLE_UNPACK" # Tuple unpacking flow
@@ -141,6 +143,25 @@ class InterproceduralDFG:
         
         # Return value tracking
         self.return_values: Dict[str, List[str]] = {}     # func_name -> [return_node_ids]
+
+        # Node type groups for compatibility with GraphNode.type (NodeType enum)
+        self.function_types = {
+            NodeType.FUNCTION,
+            NodeType.ASYNC_FUNCTION,
+            NodeType.METHOD,
+            NodeType.ARROW_FUNCTION,
+            NodeType.LAMBDA,
+        }
+        self.call_types = {
+            NodeType.CALL_EXPRESSION,
+            NodeType.EXTERNAL_CALL,
+            NodeType.SYSTEM_CALL,
+            NodeType.EVAL_CALL,
+        }
+        self.param_types = {NodeType.PARAMETER}
+        self.assignment_types = {NodeType.ASSIGNMENT, NodeType.VARIABLE}
+        self.identifier_types = {NodeType.IDENTIFIER}
+        self.return_types = {NodeType.RETURN}
         
     def build(self) -> SemanticGraph:
         """
@@ -157,35 +178,96 @@ class InterproceduralDFG:
         Returns:
             Enhanced CPG with DFG edges
         """
-        print("🔄 Building Interprocedural DFG...")
+        print("Building Interprocedural DFG...")
         
-        # Step 1: Extract function signatures and call sites
+        # Step 1: Extract function signatures
         self._extract_functions()
-        self._extract_call_sites()
-        
-        # Step 2: Build intraprocedural DFG
+
+        # Step 2: Build intraprocedural DFG (defs/uses for callbacks/closures)
         self._build_intraprocedural_dfg()
+        self._link_expression_flows()
+
+        # Step 3: Extract call sites (needs variable defs)
+        self._extract_call_sites()
+        self._link_call_argument_flows()
         
-        # Step 3: Build interprocedural edges
+        # Step 4: Build interprocedural edges
         self._build_argument_flows()
         self._build_return_flows()
         
-        # Step 4: Handle language-specific features
+        # Step 5: Handle language-specific features
         self._handle_closures()          # JavaScript
         self._handle_callbacks()         # JavaScript
         self._handle_tuple_unpacking()   # Python
         
-        # Step 5: Add uncertainty annotations
+        # Step 6: Add uncertainty annotations
         self._annotate_uncertainty()
         
-        print(f"✓ Built DFG with {len(self.dfg_edges)} interprocedural edges")
+        print(f"Built DFG with {len(self.dfg_edges)} interprocedural edges")
         
         return self.get_cpg()
+
+    def _link_call_argument_flows(self):
+        """Create DFG edges from call arguments to call expressions."""
+        for call_site in self.call_sites:
+            for i, arg_id in enumerate(call_site.arguments):
+                metadata = DFGMetadata(
+                    edge_type=DFGEdgeType.DFG_ARG_PASS,
+                    uncertainty=UncertaintyLevel.CERTAIN,
+                    context=f"Arg {i} -> Call",
+                    arg_position=i,
+                    confidence=0.9
+                )
+                edge = GraphEdge(
+                    **{
+                        "from": arg_id,
+                        "to": call_site.call_node_id,
+                        "type": EdgeType.DFG_FLOW
+                    }
+                )
+                if not edge.metadata:
+                    edge.metadata = {}
+                edge.metadata.update(metadata.model_dump())
+                edge.metadata["dfg_edge_type"] = "DFG_CALL_ARG"
+                self.dfg_edges.append(edge)
+
+    def _link_expression_flows(self):
+        """Link identifier/literal nodes to their parent expressions for forward flow."""
+        node_map = {n.id: n for n in self.cpg.nodes}
+        for edge in self.cpg.edges:
+            if edge.type != EdgeType.AST_CHILD:
+                continue
+            parent = node_map.get(edge.from_node)
+            child = node_map.get(edge.to_node)
+            if not parent or not child:
+                continue
+            if child.type not in {NodeType.IDENTIFIER, NodeType.LITERAL, NodeType.PARAMETER}:
+                continue
+            if parent.type not in {NodeType.ASSIGNMENT, NodeType.CALL_EXPRESSION, NodeType.EXPRESSION, NodeType.MEMBER_ACCESS}:
+                continue
+            metadata = DFGMetadata(
+                edge_type=DFGEdgeType.DFG_ASSIGN,
+                uncertainty=UncertaintyLevel.CERTAIN,
+                context="Expr flow",
+                confidence=0.7
+            )
+            flow_edge = GraphEdge(
+                **{
+                    "from": child.id,
+                    "to": parent.id,
+                    "type": EdgeType.DFG_FLOW
+                }
+            )
+            if not flow_edge.metadata:
+                flow_edge.metadata = {}
+            flow_edge.metadata.update(metadata.model_dump())
+            flow_edge.metadata["dfg_edge_type"] = "DFG_EXPR_FLOW"
+            self.dfg_edges.append(flow_edge)
     
     def _extract_functions(self):
         """Extract all function signatures from CPG"""
         for node in self.cpg.nodes:
-            if node.node_type in ["FUNCTION", "ASYNC_FUNCTION", "METHOD", "ARROW_FUNCTION"]:
+            if node.type in self.function_types:
                 # Find parameter nodes (children with PARAMETER type)
                 params = self._find_parameters(node.id)
                 
@@ -201,19 +283,22 @@ class InterproceduralDFG:
                     parameters=[p.name for p in params],
                     param_node_ids=[p.id for p in params],
                     return_nodes=returns,
-                    is_async=node.node_type == "ASYNC_FUNCTION",
+                    is_async=node.type == NodeType.ASYNC_FUNCTION,
                     captured_vars=captured,
                     parent_scope=self._get_parent_scope(node.id)
                 )
                 
-                self.functions[node.name or node.id] = signature
+                # Index by both name and node id to support anonymous callbacks
+                if node.name:
+                    self.functions[node.name] = signature
+                self.functions[node.id] = signature
                 
-        print(f"  ✓ Extracted {len(self.functions)} function signatures")
+        print(f"  Extracted {len(self.functions)} function signatures")
     
     def _extract_call_sites(self):
         """Extract all function call sites"""
         for node in self.cpg.nodes:
-            if node.node_type in ["CALL", "CALL_EXPRESSION", "ASYNC_CALL"]:
+            if node.type in self.call_types:
                 # Find caller function
                 caller = self._find_enclosing_function(node.id)
                 
@@ -231,15 +316,15 @@ class InterproceduralDFG:
                     caller_function=caller,
                     callee_name=callee,
                     arguments=[arg.id for arg in args],
-                    line_number=node.line_start,
-                    is_async=node.node_type == "ASYNC_CALL",
+                    line_number=node.line,
+                    is_async=node.type == NodeType.AWAIT,
                     is_callback=is_callback,
                     callback_arg_pos=cb_pos
                 )
                 
                 self.call_sites.append(call_site)
         
-        print(f"  ✓ Found {len(self.call_sites)} call sites")
+        print(f"  Found {len(self.call_sites)} call sites")
     
     def _build_intraprocedural_dfg(self):
         """Build data flow within each function"""
@@ -249,7 +334,7 @@ class InterproceduralDFG:
             
             # Track variable definitions and uses
             for node in func_nodes:
-                if node.node_type in ["VARIABLE_DECLARATION", "ASSIGNMENT", "IDENTIFIER"]:
+                if node.type in self.assignment_types or node.type in self.identifier_types or node.type in self.param_types:
                     self._track_variable_flow(node, func_sig)
             
             # Build def-use chains
@@ -284,7 +369,7 @@ class InterproceduralDFG:
                         **{
                             "from": arg_id,
                             "to": param_id,
-                            "type": EdgeType.DATA_FLOW
+                            "type": EdgeType.DFG_PARAM_PASS
                         }
                     )
                     if not edge.metadata:
@@ -319,7 +404,7 @@ class InterproceduralDFG:
                         **{
                             "from": return_value,
                             "to": call_site.call_node_id,
-                            "type": EdgeType.DATA_FLOW
+                            "type": EdgeType.DFG_RET
                         }
                     )
                     if not edge.metadata:
@@ -373,7 +458,7 @@ class InterproceduralDFG:
                             **{
                                 "from": def_node,
                                 "to": use_node,
-                                "type": EdgeType.DATA_FLOW
+                                "type": EdgeType.DFG_FLOW
                             }
                         )
                         if not edge.metadata:
@@ -435,8 +520,7 @@ class InterproceduralDFG:
             user_name, user_age, user_email = get_user()  # Unpacking
         """
         for node in self.cpg.nodes:
-            if node.node_type == "TUPLE_PATTERN" or \
-               (node.node_type == "ASSIGNMENT" and self._is_tuple_unpack(node)):
+            if node.type == NodeType.ASSIGNMENT and self._is_tuple_unpack(node):
                 
                 # Find the call expression on RHS
                 call_node = self._find_call_in_assignment(node.id)
@@ -467,7 +551,7 @@ class InterproceduralDFG:
                                 **{
                                     "from": return_elem,
                                     "to": target,
-                                    "type": EdgeType.DATA_FLOW
+                                    "type": EdgeType.DFG_FLOW
                                 }
                             )
                             if not edge.metadata:
@@ -487,42 +571,44 @@ class InterproceduralDFG:
         - eval/exec calls
         - Reflection APIs
         """
-        uncertain_patterns = [
-            "COMPUTED_MEMBER_EXPRESSION",  # obj[key]
-            "EVAL_CALL",                   # eval()
-            "DYNAMIC_IMPORT",              # import(path)
-            "REFLECT_CALL"                 # Reflect.get()
-        ]
-        
         for node in self.cpg.nodes:
-            if node.node_type in uncertain_patterns:
-                # Add uncertain DFG edge
-                metadata = DFGMetadata(
-                    edge_type=DFGEdgeType.DFG_UNCERTAIN,
-                    uncertainty=UncertaintyLevel.UNKNOWN,
-                    context=f"Dynamic operation: {node.node_type}",
-                    confidence=0.3  # Low confidence
-                )
-                
-                # Find potential sources and sinks
-                sources = self._find_potential_sources(node.id)
-                sinks = self._find_potential_sinks(node.id)
-                
-                for source in sources:
-                    for sink in sinks:
-                        edge = GraphEdge(
-                            **{
-                                "from": source,
-                                "to": sink,
-                                "type": EdgeType.DATA_FLOW
-                            }
-                        )
-                        if not edge.metadata:
-                            edge.metadata = {}
-                        edge.metadata.update(metadata.model_dump())
-                        edge.metadata['dfg_edge_type'] = DFGEdgeType.DFG_UNCERTAIN.value
-                        
-                        self.dfg_edges.append(edge)
+            is_dynamic = False
+            if node.type in {NodeType.SUBSCRIPT, NodeType.MEMBER_ACCESS}:
+                if node.source_code and "[" in node.source_code:
+                    is_dynamic = True
+            if node.type == NodeType.EVAL_CALL:
+                is_dynamic = True
+            if node.type == NodeType.EXTERNAL_CALL and node.name and "import" in node.name.lower():
+                is_dynamic = True
+            if not is_dynamic:
+                continue
+            # Add uncertain DFG edge
+            metadata = DFGMetadata(
+                edge_type=DFGEdgeType.DFG_UNCERTAIN,
+                uncertainty=UncertaintyLevel.UNKNOWN,
+                context="Dynamic operation",
+                confidence=0.3  # Low confidence
+            )
+
+            # Find potential sources and sinks
+            sources = self._find_potential_sources(node.id)
+            sinks = self._find_potential_sinks(node.id)
+
+            for source in sources:
+                for sink in sinks:
+                    edge = GraphEdge(
+                        **{
+                            "from": source,
+                            "to": sink,
+                            "type": EdgeType.DFG_FLOW
+                        }
+                    )
+                    if not edge.metadata:
+                        edge.metadata = {}
+                    edge.metadata.update(metadata.model_dump())
+                    edge.metadata['dfg_edge_type'] = DFGEdgeType.DFG_UNCERTAIN.value
+                    
+                    self.dfg_edges.append(edge)
     
     # =========================
     # Helper Methods
@@ -532,9 +618,9 @@ class InterproceduralDFG:
         """Find parameter nodes of a function"""
         params = []
         for edge in self.cpg.edges:
-            if edge.source == func_node_id and edge.edge_type in ["AST_CHILD", "HAS_PARAMETER"]:
-                param_node = self._get_node_by_id(edge.target)
-                if param_node and param_node.node_type in ["PARAMETER", "FORMAL_PARAMETER"]:
+            if edge.from_node == func_node_id and edge.type == EdgeType.AST_CHILD:
+                param_node = self._get_node_by_id(edge.to_node)
+                if param_node and param_node.type == NodeType.PARAMETER:
                     params.append(param_node)
         return params
     
@@ -543,7 +629,7 @@ class InterproceduralDFG:
         returns = []
         func_nodes = self._get_function_body_nodes(func_node_id)
         for node in func_nodes:
-            if node.node_type in ["RETURN", "RETURN_STATEMENT"]:
+            if node.type == NodeType.RETURN:
                 returns.append(node.id)
         return returns
     
@@ -564,9 +650,9 @@ class InterproceduralDFG:
         
         # Find all variables used and defined
         for node in func_nodes:
-            if node.node_type == "IDENTIFIER":
+            if node.type == NodeType.IDENTIFIER:
                 used_vars.add(node.name)
-            if node.node_type in ["VARIABLE_DECLARATION", "PARAMETER"]:
+            if node.type in {NodeType.ASSIGNMENT, NodeType.VARIABLE, NodeType.PARAMETER}:
                 defined_vars.add(node.name)
         
         # Captured = used but not defined locally
@@ -582,18 +668,18 @@ class InterproceduralDFG:
             # Find parent
             parent_edge = next(
                 (e for e in self.cpg.edges 
-                 if e.target == current and e.edge_type == "AST_CHILD"),
+                 if e.to_node == current and e.type == EdgeType.AST_CHILD),
                 None
             )
             
             if not parent_edge:
                 break
             
-            parent_node = self._get_node_by_id(parent_edge.source)
-            if parent_node and parent_node.node_type in ["FUNCTION", "ASYNC_FUNCTION"]:
+            parent_node = self._get_node_by_id(parent_edge.from_node)
+            if parent_node and parent_node.type in self.function_types:
                 return parent_node.id
             
-            current = parent_edge.source
+            current = parent_edge.from_node
         
         return "global"
     
@@ -615,20 +701,28 @@ class InterproceduralDFG:
         
         # Find function identifier child
         for edge in self.cpg.edges:
-            if edge.source == call_node.id and edge.edge_type == "AST_CHILD":
-                child = self._get_node_by_id(edge.target)
-                if child and child.node_type in ["IDENTIFIER", "MEMBER_EXPRESSION"]:
-                    return child.name or child.code
+            if edge.from_node == call_node.id and edge.type == EdgeType.AST_CHILD:
+                child = self._get_node_by_id(edge.to_node)
+                if child and child.type in {NodeType.IDENTIFIER, NodeType.MEMBER_ACCESS}:
+                    return child.name or child.source_code
         
         return "__unknown__"
     
     def _find_arguments(self, call_node_id: str) -> List[GraphNode]:
         """Find argument nodes of a call"""
         args = []
+        callee_node = self._get_callee_node(call_node_id)
         for edge in self.cpg.edges:
-            if edge.source == call_node_id and edge.edge_type == "AST_CHILD":
-                arg_node = self._get_node_by_id(edge.target)
-                if arg_node and arg_node.node_type in ["ARGUMENT", "EXPRESSION"]:
+            if edge.from_node == call_node_id and edge.type == EdgeType.AST_CHILD:
+                arg_node = self._get_node_by_id(edge.to_node)
+                if not arg_node:
+                    continue
+                if callee_node and arg_node.id == callee_node.id:
+                    continue
+                if arg_node.type in (
+                    {NodeType.EXPRESSION, NodeType.IDENTIFIER, NodeType.LITERAL, NodeType.MEMBER_ACCESS}
+                    | self.function_types
+                ):
                     args.append(arg_node)
         return args
     
@@ -639,8 +733,13 @@ class InterproceduralDFG:
         Returns: (is_callback, callback_argument_position)
         """
         for i, arg in enumerate(args):
-            if arg.node_type in ["ARROW_FUNCTION", "FUNCTION", "FUNCTION_EXPRESSION"]:
+            if arg.type in self.function_types:
                 return True, i
+            if arg.type == NodeType.IDENTIFIER:
+                scope_id = arg.metadata.scope_id if arg.metadata else None
+                resolved = self._resolve_identifier_to_function(arg.name, scope_id)
+                if resolved:
+                    return True, i
         
         return False, None
     
@@ -660,22 +759,22 @@ class InterproceduralDFG:
             
             # Traverse children
             for edge in self.cpg.edges:
-                if edge.source == node_id and edge.edge_type == "AST_CHILD":
-                    traverse(edge.target)
+                if edge.from_node == node_id and edge.type == EdgeType.AST_CHILD:
+                    traverse(edge.to_node)
         
         traverse(func_node_id)
         return result
     
     def _track_variable_flow(self, node: GraphNode, func_sig: FunctionSignature):
         """Track variable definitions and uses"""
-        if node.node_type == "VARIABLE_DECLARATION":
+        if node.type in {NodeType.ASSIGNMENT, NodeType.VARIABLE, NodeType.PARAMETER}:
             # This is a definition
             if node.name:
                 if node.name not in self.variable_defs:
                     self.variable_defs[node.name] = []
                 self.variable_defs[node.name].append(node.id)
         
-        elif node.node_type == "IDENTIFIER":
+        elif node.type == NodeType.IDENTIFIER:
             # This is a use
             if node.name:
                 if node.name not in self.variable_uses:
@@ -703,7 +802,7 @@ class InterproceduralDFG:
                     def_node = self._get_node_by_id(def_id)
                     use_node = self._get_node_by_id(use_id)
                     
-                    if def_node and use_node and def_node.line_start <= use_node.line_start:
+                    if def_node and use_node and def_node.line <= use_node.line:
                         metadata = DFGMetadata(
                             edge_type=DFGEdgeType.DFG_VAR_USE,
                             uncertainty=UncertaintyLevel.CERTAIN,
@@ -715,7 +814,7 @@ class InterproceduralDFG:
                             **{
                                 "from": def_id,
                                 "to": use_id,
-                                "type": EdgeType.DATA_FLOW
+                                "type": EdgeType.DFG_FLOW
                             }
                         )
                         if not edge.metadata:
@@ -740,8 +839,8 @@ class InterproceduralDFG:
     def _get_return_value_node(self, return_stmt_id: str) -> Optional[str]:
         """Get the actual value being returned"""
         for edge in self.cpg.edges:
-            if edge.source == return_stmt_id and edge.edge_type == "AST_CHILD":
-                return edge.target
+            if edge.from_node == return_stmt_id and edge.type == EdgeType.AST_CHILD:
+                return edge.to_node
         return None
     
     def _find_var_in_parent_scope(self, var_name: str, parent_scope: Optional[str]) -> List[str]:
@@ -767,9 +866,14 @@ class InterproceduralDFG:
         """Resolve callback argument to actual function"""
         callback_node = self._get_node_by_id(callback_arg_id)
         
-        if callback_node and callback_node.node_type in ["ARROW_FUNCTION", "FUNCTION_EXPRESSION"]:
+        if callback_node and callback_node.type in {NodeType.ARROW_FUNCTION, NodeType.FUNCTION, NodeType.METHOD}:
             # Direct callback function
             return self.functions.get(callback_node.id)
+        if callback_node and callback_node.type == NodeType.IDENTIFIER and callback_node.name:
+            scope_id = callback_node.metadata.scope_id if callback_node.metadata else None
+            func_id = self._resolve_identifier_to_function(callback_node.name, scope_id)
+            if func_id:
+                return self.functions.get(func_id)
         
         # Could be a variable reference - would need more analysis
         return None
@@ -780,7 +884,7 @@ class InterproceduralDFG:
         func_nodes = self._get_function_body_nodes(func_id)
         
         for node in func_nodes:
-            if node.node_type == "CALL_EXPRESSION":
+            if node.type == NodeType.CALL_EXPRESSION:
                 callee_name = self._get_callee_name(node)
                 if callee_name == callback_param_name:
                     invocations.append(node)
@@ -809,7 +913,7 @@ class InterproceduralDFG:
                     **{
                         "from": arg_id,
                         "to": param_id,
-                        "type": EdgeType.DATA_FLOW
+                        "type": EdgeType.DFG_FLOW
                     }
                 )
                 if not edge.metadata:
@@ -822,28 +926,75 @@ class InterproceduralDFG:
     def _is_tuple_unpack(self, node: GraphNode) -> bool:
         """Check if assignment is tuple unpacking"""
         # Look for tuple pattern on LHS or multiple assignment targets
-        return "," in (node.code or "")  # Simplistic check
+        return "," in (node.source_code or "")  # Simplistic check
     
     def _find_call_in_assignment(self, assignment_id: str) -> Optional[GraphNode]:
         """Find call expression on RHS of assignment"""
         for edge in self.cpg.edges:
-            if edge.source == assignment_id and edge.edge_type == "AST_CHILD":
-                child = self._get_node_by_id(edge.target)
-                if child and child.node_type in ["CALL", "CALL_EXPRESSION"]:
+            if edge.from_node == assignment_id and edge.type == EdgeType.AST_CHILD:
+                child = self._get_node_by_id(edge.to_node)
+                if child and child.type == NodeType.CALL_EXPRESSION:
                     return child
         return None
     
     def _get_callee_name_from_node(self, call_node: GraphNode) -> str:
         """Get callee name from call node"""
         return self._get_callee_name(call_node)
+
+    def _get_callee_node(self, call_node_id: str) -> Optional[GraphNode]:
+        """Get callee node for a call expression."""
+        for edge in self.cpg.edges:
+            if edge.from_node == call_node_id and edge.type == EdgeType.AST_CHILD:
+                child = self._get_node_by_id(edge.to_node)
+                if child and child.type in {NodeType.IDENTIFIER, NodeType.MEMBER_ACCESS}:
+                    return child
+        return None
+
+    def _resolve_identifier_to_function(self, identifier: Optional[str], scope_id: Optional[str]) -> Optional[str]:
+        """Resolve identifier to a function node id via scope-aware symbol table."""
+        if not identifier:
+            return None
+        # Walk up lexical scopes for nearest symbol definition
+        current_scope = scope_id or "global"
+        while current_scope:
+            scope_info = self.cpg.scopes.get(current_scope, {})
+            symbols = scope_info.get("symbols", {})
+            if identifier in symbols:
+                symbol_node_id = symbols[identifier]
+                resolved = self._resolve_symbol_node_to_function(symbol_node_id)
+                if resolved:
+                    return resolved
+            current_scope = scope_info.get("parent")
+
+        # Fallback: check assignment defs for function expressions
+        for def_id in self.variable_defs.get(identifier, []):
+            resolved = self._resolve_symbol_node_to_function(def_id)
+            if resolved:
+                return resolved
+        return None
+
+    def _resolve_symbol_node_to_function(self, symbol_node_id: str) -> Optional[str]:
+        """Resolve a symbol node to an underlying function node."""
+        symbol_node = self._get_node_by_id(symbol_node_id)
+        if not symbol_node:
+            return None
+        if symbol_node.type in self.function_types:
+            return symbol_node.id
+        # Check if the symbol node has a function child (assignment/variable)
+        for edge in self.cpg.edges:
+            if edge.from_node == symbol_node_id and edge.type == EdgeType.AST_CHILD:
+                child = self._get_node_by_id(edge.to_node)
+                if child and child.type in self.function_types:
+                    return child.id
+        return None
     
     def _find_unpack_targets(self, assignment_id: str) -> List[str]:
         """Find unpacking target variable IDs"""
         targets = []
         for edge in self.cpg.edges:
-            if edge.source == assignment_id and edge.edge_type == "AST_CHILD":
-                child = self._get_node_by_id(edge.target)
-                if child and child.node_type == "IDENTIFIER":
+            if edge.from_node == assignment_id and edge.type == EdgeType.AST_CHILD:
+                child = self._get_node_by_id(edge.to_node)
+                if child and child.type == NodeType.IDENTIFIER:
                     targets.append(child.id)
         return targets
     
@@ -853,13 +1004,13 @@ class InterproceduralDFG:
         for return_id in func_sig.return_nodes:
             # Find tuple expression
             for edge in self.cpg.edges:
-                if edge.source == return_id and edge.edge_type == "AST_CHILD":
-                    child = self._get_node_by_id(edge.target)
-                    if child and child.node_type in ["TUPLE", "ARRAY"]:
+                if edge.from_node == return_id and edge.type == EdgeType.AST_CHILD:
+                    child = self._get_node_by_id(edge.to_node)
+                    if child and child.source_code and "," in child.source_code:
                         # Find tuple elements
                         for e2 in self.cpg.edges:
-                            if e2.source == child.id and e2.edge_type == "AST_CHILD":
-                                elements.append(e2.target)
+                            if e2.from_node == child.id and e2.type == EdgeType.AST_CHILD:
+                                elements.append(e2.to_node)
         return elements
     
     def _find_potential_sources(self, node_id: str) -> List[str]:
@@ -867,8 +1018,8 @@ class InterproceduralDFG:
         # For uncertain nodes, look at incoming edges
         sources = []
         for edge in self.cpg.edges:
-            if edge.target == node_id:
-                sources.append(edge.source)
+            if edge.to_node == node_id:
+                sources.append(edge.from_node)
         return sources
     
     def _find_potential_sinks(self, node_id: str) -> List[str]:
@@ -876,8 +1027,8 @@ class InterproceduralDFG:
         # For uncertain nodes, look at outgoing edges
         sinks = []
         for edge in self.cpg.edges:
-            if edge.source == node_id:
-                sinks.append(edge.target)
+            if edge.from_node == node_id:
+                sinks.append(edge.to_node)
         return sinks
     
     def _get_node_by_id(self, node_id: str) -> Optional[GraphNode]:
@@ -938,10 +1089,23 @@ class InterproceduralDFG:
             
             # Follow DFG edges
             for edge in self.dfg_edges:
-                if edge.source == current:
-                    edge_type = DFGEdgeType(edge.edge_type)
-                    path.append((edge.source, edge.target, edge_type))
-                    dfs(edge.target, target, path, depth + 1)
+                if edge.from_node == current:
+                    edge_type_value = None
+                    if edge.metadata:
+                        edge_type_value = edge.metadata.get("dfg_edge_type")
+                    if not edge_type_value:
+                        if edge.type == EdgeType.DFG_PARAM_PASS:
+                            edge_type_value = DFGEdgeType.DFG_ARG_PASS.value
+                        elif edge.type == EdgeType.DFG_RET:
+                            edge_type_value = DFGEdgeType.DFG_RET.value
+                        else:
+                            edge_type_value = DFGEdgeType.DFG_VAR_USE.value
+                    try:
+                        edge_type = DFGEdgeType(edge_type_value)
+                    except Exception:
+                        edge_type = DFGEdgeType.DFG_VAR_USE
+                    path.append((edge.from_node, edge.to_node, edge_type))
+                    dfs(edge.to_node, target, path, depth + 1)
                     path.pop()
             
             visited.remove(current)
@@ -968,7 +1132,7 @@ class InterproceduralDFG:
         confidences = []
         for source, target, edge_type in path:
             edge = next((e for e in self.dfg_edges 
-                        if e.source == source and e.target == target), None)
+                        if e.from_node == source and e.to_node == target), None)
             if edge and edge.metadata:
                 confidences.append(edge.metadata.get("confidence", 1.0))
         
@@ -1001,7 +1165,7 @@ class InterproceduralDFG:
         
         # Count edge types
         for edge in self.dfg_edges:
-            edge_type = edge.edge_type
+            edge_type = edge.type
             stats["edge_types"][edge_type] = stats["edge_types"].get(edge_type, 0) + 1
             
             if edge.metadata and edge.metadata.get("uncertainty") != "certain":

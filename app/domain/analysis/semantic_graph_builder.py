@@ -56,16 +56,19 @@ class SemanticGraphBuilder:
             SemanticGraph with nodes, edges, and analysis results
         """
         # Step 1: Parse CPG
+        if not self.cpg_parser.has_language(self.language):
+            raise RuntimeError(
+                f"Missing tree-sitter grammar for '{self.language}'. "
+                "Run: python setup_grammars.py"
+            )
         cpg = self.cpg_parser.parse_code(code, self.language, filename)
         
         # Step 2: Build interprocedural DFG
         dfg_builder = InterproceduralDFG(cpg)
         enhanced_cpg = dfg_builder.build()
         
-        # Step 3: Convert CPG to SemanticGraph (for backward compatibility)
-        semantic_graph = self._cpg_to_semantic_graph(enhanced_cpg)
-        
-        return semantic_graph
+        # Step 3: Return enhanced CPG directly (already SemanticGraph-compatible)
+        return enhanced_cpg
     
     def _cpg_to_semantic_graph(self, cpg) -> SemanticGraph:
         """
@@ -106,11 +109,11 @@ class SemanticGraphBuilder:
         # Convert edges
         for cpg_edge in cpg.edges:
             # Map CPG edge type to legacy EdgeType
-            edge_type = self._map_edge_type(cpg_edge.edge_type)
+            edge_type = cpg_edge.type if isinstance(cpg_edge.type, EdgeType) else self._map_edge_type(cpg_edge.type)
             
             graph_edge = GraphEdge(
-                source=cpg_edge.source,
-                target=cpg_edge.target,
+                from_node=cpg_edge.from_node,
+                to_node=cpg_edge.to_node,
                 type=edge_type,
                 metadata=cpg_edge.metadata or {}
             )
@@ -146,18 +149,20 @@ class SemanticGraphBuilder:
         
         return type_mapping.get(cpg_type, NodeType.UNKNOWN)
     
-    def _map_edge_type(self, cpg_edge_type: str) -> EdgeType:
+    def _map_edge_type(self, cpg_edge_type: str | EdgeType) -> EdgeType:
         """Map CPG edge type to legacy EdgeType enum"""
+        if isinstance(cpg_edge_type, EdgeType):
+            return cpg_edge_type
         type_mapping = {
-            "AST_CHILD": EdgeType.AST,
-            "CONTROL_FLOW": EdgeType.CFG,
-            "DFG_ARG_PASS": EdgeType.DFG,
-            "DFG_RET": EdgeType.DFG,
-            "DFG_VAR_USE": EdgeType.DFG,
-            "DFG_CLOSURE": EdgeType.DFG,
-            "DFG_CALLBACK": EdgeType.DFG,
-            "DFG_TUPLE_UNPACK": EdgeType.DFG,
-            "DFG_UNCERTAIN": EdgeType.DFG,
+            "AST_CHILD": EdgeType.AST_CHILD,
+            "CONTROL_FLOW": EdgeType.CONTROL_FLOW,
+            "DFG_ARG_PASS": EdgeType.DFG_PARAM_PASS,
+            "DFG_RET": EdgeType.DFG_RET,
+            "DFG_VAR_USE": EdgeType.DFG_FLOW,
+            "DFG_CLOSURE": EdgeType.DFG_FLOW,
+            "DFG_CALLBACK": EdgeType.DFG_FLOW,
+            "DFG_TUPLE_UNPACK": EdgeType.DFG_FLOW,
+            "DFG_UNCERTAIN": EdgeType.DFG_FLOW,
+            "TAINT_FLOW": EdgeType.TAINT_FLOW,
         }
-        
-        return type_mapping.get(cpg_edge_type, EdgeType.UNKNOWN)
+        return type_mapping.get(cpg_edge_type, EdgeType.DATA_FLOW)

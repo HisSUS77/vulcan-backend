@@ -19,7 +19,7 @@ import re
 
 from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph
 from app.enums.edge_type import EdgeType
-from app.domain.analysis.html_parser import HTMLParser, HTMLEdgeType
+from app.domain.analysis.html_parser import HTMLParser, HTMLEdgeType, HTMLNodeType
 
 
 class HTMLBackendLinker:
@@ -68,7 +68,7 @@ class HTMLBackendLinker:
         Returns:
             List of cross-file edges
         """
-        print(f"🔗 Linking HTML to backend...")
+        print("Linking HTML to backend...")
         
         # Step 1: Extract backend routes
         self._extract_backend_routes()
@@ -78,6 +78,9 @@ class HTMLBackendLinker:
         
         # Step 3: Link template variables to backend data
         self._link_template_variables()
+
+        # Step 4: Link DOM event handlers to backend routes (heuristic)
+        self._link_dom_handlers()
         
         print(f"  ✓ Created {len(self.cross_file_edges)} cross-file edges")
         
@@ -93,10 +96,31 @@ class HTMLBackendLinker:
                     route = route_match.group(1)
                     # Find the function node (should be next)
                     self.route_to_handler[route] = node.id
+
+            # Flask Blueprint: @bp.route('/path')
+            elif node.source_code and re.search(r'@\w+\.route\(', node.source_code):
+                route_match = re.search(r'@\w+\.route\(["\']([^"\']+)["\']', node.source_code)
+                if route_match:
+                    route = route_match.group(1)
+                    self.route_to_handler[route] = node.id
+
+            # FastAPI / Starlette: @app.get('/path') / @router.post('/path')
+            elif node.source_code and re.search(r'@(app|router)\.(get|post|put|delete|patch|options|head)\(', node.source_code):
+                route_match = re.search(r'@(app|router)\.\w+\(["\']([^"\']+)["\']', node.source_code)
+                if route_match:
+                    route = route_match.group(2)
+                    self.route_to_handler[route] = node.id
             
             # Express: app.get('/path', handler)
             elif node.source_code and re.search(r'app\.(get|post|put|delete)\(', node.source_code):
                 route_match = re.search(r'app\.\w+\(["\']([^"\']+)["\']', node.source_code)
+                if route_match:
+                    route = route_match.group(1)
+                    self.route_to_handler[route] = node.id
+
+            # Express Router: router.get('/path', handler)
+            elif node.source_code and re.search(r'router\.(get|post|put|delete)\(', node.source_code):
+                route_match = re.search(r'router\.\w+\(["\']([^"\']+)["\']', node.source_code)
                 if route_match:
                     route = route_match.group(1)
                     self.route_to_handler[route] = node.id
@@ -106,6 +130,13 @@ class HTMLBackendLinker:
                 route_match = re.search(r'path\(["\']([^"\']+)["\']', node.source_code)
                 if route_match:
                     route = route_match.group(1)
+                    self.route_to_handler[route] = node.id
+
+            # Django: re_path('regex', view) / url('regex', view)
+            elif node.source_code and ('re_path(' in node.source_code or 'url(' in node.source_code):
+                route_match = re.search(r'(re_path|url)\(["\']([^"\']+)["\']', node.source_code)
+                if route_match:
+                    route = route_match.group(2)
                     self.route_to_handler[route] = node.id
             
             # Template rendering: render_template('file.html', var=data)
@@ -132,12 +163,30 @@ class HTMLBackendLinker:
                 if template_match:
                     template_name = template_match.group(1)
                     self.handler_to_template[node.id] = template_name
+
+                # Django: render(request, "file.html", {...})
+                template_match = re.search(
+                    r'render\([^,]+,\s*["\']([^"\']+)["\']',
+                    node.source_code
+                )
+                if template_match:
+                    template_name = template_match.group(1)
+                    self.handler_to_template[node.id] = template_name
+
+                # FastAPI: templates.TemplateResponse("file.html", {...})
+                template_match = re.search(
+                    r'TemplateResponse\(["\']([^"\']+)["\']',
+                    node.source_code
+                )
+                if template_match:
+                    template_name = template_match.group(1)
+                    self.handler_to_template[node.id] = template_name
     
     def _link_forms_to_routes(self):
         """Link HTML forms to backend route handlers"""
         for node in self.html_graph.nodes:
             # Check if this is a form node (HTML-specific data in value field)
-            if node.value and node.value.get('html_node_type') == 'HTML_FORM':
+            if node.value and node.value.get('html_node_type') == HTMLNodeType.HTML_FORM.value:
                 form_action = node.value.get('form_action', '')
                 
                 # Find matching backend route
@@ -159,6 +208,25 @@ class HTMLBackendLinker:
                         'target_file': self._find_handler_file(handler_id)
                     }
                     self.cross_file_edges.append(edge)
+
+                # Also link form to known endpoints (HTTP_ENDPOINT nodes)
+                for handler in self.backend_graph.nodes:
+                    if handler.type == NodeType.HTTP_ENDPOINT:
+                        if form_action and (form_action in (handler.name or "")):
+                            edge = GraphEdge(
+                                **{
+                                    "from": node.id,
+                                    "to": handler.id,
+                                    "type": EdgeType.HTTP_FLOW
+                                }
+                            )
+                            edge.metadata = {
+                                'html_edge_type': HTMLEdgeType.FORM_TO_ROUTE.value,
+                                'form_action': form_action,
+                                'source_file': self.html_file,
+                                'target_file': handler.file
+                            }
+                            self.cross_file_edges.append(edge)
     
     def _link_template_variables(self):
         """Link template variables to backend data sources"""
@@ -168,7 +236,7 @@ class HTMLBackendLinker:
         # Find template variables in HTML (HTML-specific data in value field)
         html_template_nodes = [
             node for node in self.html_graph.nodes
-            if node.value and node.value.get('html_node_type') == 'HTML_TEMPLATE_VAR'
+            if node.value and node.value.get('html_node_type') == HTMLNodeType.HTML_TEMPLATE_VAR.value
         ]
         
         # Find backend variables passed to this template
@@ -249,6 +317,32 @@ class HTMLBackendLinker:
                 handler_nodes.append(node)
         
         return handler_nodes
+
+    def _link_dom_handlers(self):
+        """Link DOM event handlers and inline scripts to backend routes."""
+        for node in self.html_graph.nodes:
+            if node.value and node.value.get('html_node_type') == HTMLNodeType.HTML_EVENT_HANDLER.value:
+                handler_code = node.value.get('handler_code', '')
+                # Heuristic: fetch('/path') or $.ajax('/path')
+                match = re.search(r'["\'](/[^"\']+)["\']', handler_code)
+                if match:
+                    action = match.group(1)
+                    handler_id = self._find_route_handler(action)
+                    if handler_id:
+                        edge = GraphEdge(
+                            **{
+                                "from": node.id,
+                                "to": handler_id,
+                                "type": EdgeType.HTTP_FLOW
+                            }
+                        )
+                        edge.metadata = {
+                            'html_edge_type': HTMLEdgeType.EVENT_TRIGGER.value,
+                            'form_action': action,
+                            'source_file': self.html_file,
+                            'target_file': self._find_handler_file(handler_id)
+                        }
+                        self.cross_file_edges.append(edge)
 
 
 def extract_xss_paths(

@@ -84,6 +84,7 @@ class NodeType(str, Enum):
     HTTP_RESPONSE = "HttpResponse"
     ROUTE_DECORATOR = "RouteDecorator"
     MIDDLEWARE = "Middleware"
+    AUTH_GUARD = "AuthGuard"
     
     # Database
     ORM_QUERY = "ORMQuery"

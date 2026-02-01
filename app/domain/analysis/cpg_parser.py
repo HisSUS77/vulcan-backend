@@ -25,6 +25,7 @@ try:
 except ImportError:
     TREE_SITTER_AVAILABLE = False
     logging.warning("tree-sitter not installed")
+    from typing import Any as TSNode
 
 from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph, NodeMetadata
 from app.enums.node_type import NodeType
@@ -95,6 +96,25 @@ class CPGParser:
         self.current_scope_id: Optional[str] = None
         self.symbol_references: List[SymbolReference] = []
         self.symbol_table: Dict[str, List[str]] = {}  # symbol -> [node_ids]
+        self.call_nodes: List[GraphNode] = []
+        self._source_bytes: Optional[bytes] = None
+
+    def _slice_source(self, start: int, end: int, source_code: str) -> str:
+        """Slice source using byte offsets from tree-sitter."""
+        if self._source_bytes is not None:
+            return self._source_bytes[start:end].decode("utf-8", errors="ignore")
+        return source_code[start:end]
+
+    def has_language(self, language: LanguageType | str) -> bool:
+        """Return True if parser for language is loaded."""
+        lang = self._normalize_language(language)
+        if not lang:
+            return False
+        return lang in self.parsers
+
+    def available_languages(self) -> List[str]:
+        """Return list of loaded language names."""
+        return [lang.value for lang in self.parsers.keys()]
     
     def _find_grammar_path(self) -> Path:
         """Find grammar files directory"""
@@ -113,8 +133,8 @@ class CPGParser:
         return default_path
     
     def _load_languages(self):
-        """Load JavaScript and TypeScript grammars"""
-        for lang in [LanguageType.JAVASCRIPT, LanguageType.TYPESCRIPT]:
+        """Load language grammars (JS/TS/Python)"""
+        for lang in [LanguageType.JAVASCRIPT, LanguageType.TYPESCRIPT, LanguageType.PYTHON]:
             try:
                 so_file = self.grammar_path / f"{lang.value}.so"
                 dll_file = self.grammar_path / f"{lang.value}.dll"
@@ -136,8 +156,34 @@ class CPGParser:
                 logger.info(f"Loaded {lang.value} grammar")
             except Exception as e:
                 logger.error(f"Failed to load {lang.value}: {e}")
+
+        # Prefer tree_sitter_languages for Python if available (more reliable on Windows)
+        try:
+            from tree_sitter_languages import get_language
+            py_lang = get_language("python")
+            py_parser = Parser()
+            py_parser.set_language(py_lang)
+            self.languages[LanguageType.PYTHON] = py_lang
+            self.parsers[LanguageType.PYTHON] = py_parser
+            logger.info("Loaded python grammar via tree_sitter_languages")
+        except Exception:
+            pass
+
+    def _normalize_language(self, language: LanguageType | str) -> Optional[LanguageType]:
+        """Normalize language input to LanguageType enum."""
+        if isinstance(language, LanguageType):
+            return language
+        if isinstance(language, str):
+            name = language.lower()
+            if name in ["python", "py"]:
+                return LanguageType.PYTHON
+            if name in ["javascript", "js", "jsx"]:
+                return LanguageType.JAVASCRIPT
+            if name in ["typescript", "ts", "tsx"]:
+                return LanguageType.TYPESCRIPT
+        return None
     
-    def parse_file(self, filepath: str) -> SemanticGraph:
+    def parse_file(self, filepath: str, language: Optional[LanguageType | str] = None) -> SemanticGraph:
         """
         Parse a JavaScript or TypeScript file into a CPG.
         
@@ -149,7 +195,20 @@ class CPGParser:
         """
         # Detect language
         ext = Path(filepath).suffix.lower()
-        lang = LanguageType.TYPESCRIPT if ext in ['.ts', '.tsx'] else LanguageType.JAVASCRIPT
+        if language is None:
+            if ext in ['.ts', '.tsx']:
+                lang = LanguageType.TYPESCRIPT
+            elif ext in ['.js', '.jsx', '.mjs', '.cjs']:
+                lang = LanguageType.JAVASCRIPT
+            elif ext in ['.py', '.pyw']:
+                lang = LanguageType.PYTHON
+            else:
+                lang = LanguageType.JAVASCRIPT
+        else:
+            lang = self._normalize_language(language)
+            if lang is None:
+                logger.error(f"Unsupported language: {language}")
+                return SemanticGraph(nodes=[], edges=[])
         
         # Read source code
         try:
@@ -161,7 +220,7 @@ class CPGParser:
         
         return self.parse_code(source_code, lang, filepath)
     
-    def parse_code(self, source_code: str, language: LanguageType, filename: str = "unknown") -> SemanticGraph:
+    def parse_code(self, source_code: str, language: LanguageType | str, filename: str = "unknown") -> SemanticGraph:
         """
         Parse source code into a Code Property Graph.
         
@@ -177,8 +236,12 @@ class CPGParser:
             - Symbol references
             - Parent/child relationships
         """
-        if language not in self.parsers:
-            logger.error(f"No parser for {language.value}")
+        lang = self._normalize_language(language)
+        if lang is None:
+            logger.error(f"Unsupported language: {language}")
+            return SemanticGraph(nodes=[], edges=[])
+        if lang not in self.parsers:
+            logger.error(f"No parser for {lang.value}")
             return SemanticGraph(nodes=[], edges=[])
         
         # Reset state
@@ -187,10 +250,11 @@ class CPGParser:
         self.current_scope_id = None
         self.symbol_references = []
         self.symbol_table = {}
+        self._source_bytes = source_code.encode("utf-8", errors="ignore")
         
         try:
             # Parse with Tree-sitter
-            parser = self.parsers[language]
+            parser = self.parsers[lang]
             tree = parser.parse(bytes(source_code, "utf8"))
             
             # Check for errors (but continue anyway - error-tolerant)
@@ -211,7 +275,7 @@ class CPGParser:
                 line=1,
                 column=0,
                 metadata=NodeMetadata(
-                    language=language.value,
+                    language=lang.value,
                     scope_id="global"
                 )
             )
@@ -230,13 +294,16 @@ class CPGParser:
             self.current_scope_id = "global"
             
             # Extract CPG from AST
-            self._extract_cpg(tree.root_node, file_node_id, source_code, filename, nodes, edges, language)
-            
+            self._extract_cpg(tree.root_node, file_node_id, source_code, filename, nodes, edges, lang)
+
             # Build symbol table
             for ref in self.symbol_references:
                 if ref.symbol_name not in self.symbol_table:
                     self.symbol_table[ref.symbol_name] = []
                 self.symbol_table[ref.symbol_name].append(ref.node_id)
+
+            # Link call graph edges (name-based resolution)
+            self._link_call_graph(nodes, edges)
             
             # Create semantic graph
             graph = SemanticGraph(
@@ -291,7 +358,7 @@ class CPGParser:
         # Extract source code for this node
         start_byte = ts_node.start_byte
         end_byte = ts_node.end_byte
-        node_source = source_code[start_byte:end_byte]
+        node_source = self._slice_source(start_byte, end_byte, source_code)
         
         # Truncate long source code
         if len(node_source) > 200:
@@ -301,8 +368,15 @@ class CPGParser:
         node_id = self._next_id()
         graph_node = None
         
+        # ROUTE DECORATORS (Python)
+        if node_type == "decorator":
+            graph_node = self._extract_decorator(ts_node, node_id, source_code, filename, language)
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+
         # FUNCTION DECLARATIONS
-        if node_type in ("function_declaration", "function"):
+        if node_type in ("function_declaration", "function_definition", "function_expression"):
             graph_node = self._extract_function(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
@@ -310,6 +384,18 @@ class CPGParser:
                 
                 # Create function scope
                 self._enter_scope(node_id, "function", ts_node, graph_node.name)
+                # Create parameter nodes
+                for param_node in self._extract_parameters(ts_node, node_id, source_code, filename, language):
+                    nodes.append(param_node)
+                    edges.append(GraphEdge(from_node=node_id, to_node=param_node.id, type=EdgeType.AST_CHILD))
+                # Attach decorators (Python): link decorator nodes to function
+                for child in ts_node.children:
+                    if child.type == "decorator":
+                        decorator_node_id = self._next_id()
+                        deco_node = self._extract_decorator(child, decorator_node_id, source_code, filename, language)
+                        if deco_node:
+                            nodes.append(deco_node)
+                            edges.append(GraphEdge(from_node=node_id, to_node=decorator_node_id, type=EdgeType.AST_CHILD))
                 
                 # Process children
                 for child in ts_node.children:
@@ -327,6 +413,10 @@ class CPGParser:
                 
                 # Create function scope
                 self._enter_scope(node_id, "function", ts_node, graph_node.name or "anonymous")
+                # Create parameter nodes
+                for param_node in self._extract_parameters(ts_node, node_id, source_code, filename, language):
+                    nodes.append(param_node)
+                    edges.append(GraphEdge(from_node=node_id, to_node=param_node.id, type=EdgeType.AST_CHILD))
                 
                 for child in ts_node.children:
                     self._extract_cpg(child, node_id, source_code, filename, nodes, edges, language)
@@ -335,7 +425,7 @@ class CPGParser:
                 return
         
         # CLASS DECLARATIONS
-        elif node_type == "class_declaration":
+        elif node_type in ("class_declaration", "class_definition"):
             graph_node = self._extract_class(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
@@ -358,6 +448,10 @@ class CPGParser:
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
                 
                 self._enter_scope(node_id, "function", ts_node, graph_node.name)
+                # Create parameter nodes
+                for param_node in self._extract_parameters(ts_node, node_id, source_code, filename, language):
+                    nodes.append(param_node)
+                    edges.append(GraphEdge(from_node=node_id, to_node=param_node.id, type=EdgeType.AST_CHILD))
                 
                 for child in ts_node.children:
                     self._extract_cpg(child, node_id, source_code, filename, nodes, edges, language)
@@ -366,28 +460,29 @@ class CPGParser:
                 return
         
         # IMPORTS
-        elif node_type in ("import_statement", "import_specifier"):
+        elif node_type in ("import_statement", "import_declaration", "import_specifier", "import_from_statement"):
             graph_node = self._extract_import(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
         
         # EXPORTS
-        elif node_type in ("export_statement", "export_specifier"):
+        elif node_type in ("export_statement", "export_declaration", "export_clause", "export_specifier"):
             graph_node = self._extract_export(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
         
         # CALL EXPRESSIONS
-        elif node_type == "call_expression":
+        elif node_type in ("call_expression", "call"):
             graph_node = self._extract_call(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+                self.call_nodes.append(graph_node)
         
         # MEMBER EXPRESSIONS (obj.prop.method)
-        elif node_type == "member_expression":
+        elif node_type in ("member_expression", "attribute"):
             graph_node = self._extract_member_expression(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
@@ -396,6 +491,11 @@ class CPGParser:
         # VARIABLE DECLARATIONS
         elif node_type == "variable_declaration":
             graph_node = self._extract_variable_declaration(ts_node, node_id, source_code, filename, language)
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("assignment", "assignment_expression"):
+            graph_node = self._extract_assignment(ts_node, node_id, source_code, filename, language)
             if graph_node:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
@@ -442,17 +542,17 @@ class CPGParser:
         # Register symbol
         if name:
             self._register_symbol(name, node_id, is_declaration=True)
-        
-        return GraphNode(
+        func_node = GraphNode(
             id=node_id,
             type=NodeType.ASYNC_FUNCTION if is_async else NodeType.FUNCTION,
             name=name or "anonymous",
             file=filename,
             line=ts_node.start_point[0] + 1,
             column=ts_node.start_point[1],
-            source_code=source_code[ts_node.start_byte:ts_node.end_byte][:200],
+            source_code=self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)[:200],
             metadata=metadata
         )
+        return func_node
     
     def _extract_arrow_function(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract arrow function"""
@@ -460,7 +560,7 @@ class CPGParser:
         # Try to find parent variable declarator for name
         name = "anonymous"
         
-        is_async = "async" in source_code[ts_node.start_byte:ts_node.start_byte+10]
+        is_async = "async" in self._slice_source(ts_node.start_byte, ts_node.start_byte + 10, source_code)
         
         metadata = NodeMetadata(
             language=language.value,
@@ -475,7 +575,7 @@ class CPGParser:
             file=filename,
             line=ts_node.start_point[0] + 1,
             column=ts_node.start_point[1],
-            source_code=source_code[ts_node.start_byte:ts_node.end_byte][:200],
+            source_code=self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)[:200],
             metadata=metadata
         )
     
@@ -499,7 +599,7 @@ class CPGParser:
             file=filename,
             line=ts_node.start_point[0] + 1,
             column=ts_node.start_point[1],
-            source_code=source_code[ts_node.start_byte:ts_node.end_byte][:200],
+            source_code=self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)[:200],
             metadata=metadata
         )
     
@@ -533,19 +633,19 @@ class CPGParser:
             file=filename,
             line=ts_node.start_point[0] + 1,
             column=ts_node.start_point[1],
-            source_code=source_code[ts_node.start_byte:ts_node.end_byte][:200],
+            source_code=self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)[:200],
             metadata=metadata
         )
     
     def _extract_import(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract import statement"""
-        import_text = source_code[ts_node.start_byte:ts_node.end_byte]
+        import_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         # Extract imported names
         imported_names = []
         for child in ts_node.children:
             if child.type in ("identifier", "import_clause"):
-                name = source_code[child.start_byte:child.end_byte]
+                name = self._slice_source(child.start_byte, child.end_byte, source_code)
                 imported_names.append(name)
         
         metadata = NodeMetadata(
@@ -567,7 +667,7 @@ class CPGParser:
     
     def _extract_export(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract export statement"""
-        export_text = source_code[ts_node.start_byte:ts_node.end_byte]
+        export_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         metadata = NodeMetadata(
             language=language.value,
@@ -589,13 +689,13 @@ class CPGParser:
     
     def _extract_call(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract call expression"""
-        call_text = source_code[ts_node.start_byte:ts_node.end_byte]
+        call_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         # Extract function name
         func_name = None
         for child in ts_node.children:
-            if child.type in ("identifier", "member_expression"):
-                func_name = source_code[child.start_byte:child.end_byte]
+            if child.type in ("identifier", "member_expression", "attribute"):
+                func_name = self._slice_source(child.start_byte, child.end_byte, source_code)
                 break
         
         metadata = NodeMetadata(
@@ -614,10 +714,33 @@ class CPGParser:
             source_code=call_text,
             metadata=metadata
         )
+
+    def _extract_decorator(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
+        """Extract Python decorator (route/auth)."""
+        decorator_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
+        metadata = NodeMetadata(
+            language=language.value,
+            scope_id=self.current_scope_id
+        )
+        node_type = NodeType.ROUTE_DECORATOR if "route" in decorator_text or "router." in decorator_text else NodeType.EXPRESSION
+        if any(tok in decorator_text for tok in ["login_required", "permission_required", "authorize", "is_authenticated"]):
+            metadata.security_role = "auth_guard"
+            node_type = NodeType.AUTH_GUARD
+        return GraphNode(
+            id=node_id,
+            type=node_type,
+            name="decorator",
+            value=decorator_text[:100],
+            file=filename,
+            line=ts_node.start_point[0] + 1,
+            column=ts_node.start_point[1],
+            source_code=decorator_text,
+            metadata=metadata
+        )
     
     def _extract_member_expression(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract member expression (obj.prop.method)"""
-        member_text = source_code[ts_node.start_byte:ts_node.end_byte]
+        member_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         metadata = NodeMetadata(
             language=language.value,
@@ -638,7 +761,7 @@ class CPGParser:
     
     def _extract_variable_declaration(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract variable declaration"""
-        var_text = source_code[ts_node.start_byte:ts_node.end_byte]
+        var_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         # Extract variable names
         var_names = []
@@ -646,7 +769,7 @@ class CPGParser:
             if child.type == "variable_declarator":
                 for subchild in child.children:
                     if subchild.type == "identifier":
-                        name = source_code[subchild.start_byte:subchild.end_byte]
+                        name = self._slice_source(subchild.start_byte, subchild.end_byte, source_code)
                         var_names.append(name)
                         self._register_symbol(name, node_id, is_declaration=True)
         
@@ -666,10 +789,70 @@ class CPGParser:
             source_code=var_text,
             metadata=metadata
         )
+
+    def _link_call_graph(self, nodes: List[GraphNode], edges: List[GraphEdge]):
+        """Create CALL_GRAPH edges by name-based resolution (local scope)."""
+        # Build index of functions/methods/classes by name
+        name_to_node: Dict[str, List[str]] = {}
+        for node in nodes:
+            if node.type in {NodeType.FUNCTION, NodeType.ASYNC_FUNCTION, NodeType.METHOD, NodeType.CLASS}:
+                if node.name:
+                    name_to_node.setdefault(node.name, []).append(node.id)
+
+        for call_node in self.call_nodes:
+            callee = call_node.name or ""
+            if not callee:
+                continue
+            # Normalize member access: obj.method -> method
+            if "." in callee:
+                callee = callee.split(".")[-1]
+            targets = name_to_node.get(callee, [])
+            for target_id in targets:
+                edge = GraphEdge(
+                    **{
+                        "from": call_node.id,
+                        "to": target_id,
+                        "type": EdgeType.CALL_GRAPH
+                    }
+                )
+                edge.metadata = {
+                    "callee": callee,
+                    "resolution": "local_symbol"
+                }
+                edges.append(edge)
+
+    def _extract_assignment(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
+        """Extract assignment (Python and generic)"""
+        assign_text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
+        var_names = []
+        for child in ts_node.children:
+            if child.type == "identifier":
+                name = self._slice_source(child.start_byte, child.end_byte, source_code)
+                var_names.append(name)
+                self._register_symbol(name, node_id, is_declaration=True)
+            elif child.type == "attribute":
+                attr_text = self._slice_source(child.start_byte, child.end_byte, source_code)
+                if attr_text:
+                    var_names.append(attr_text)
+        metadata = NodeMetadata(
+            language=language.value,
+            scope_id=self.current_scope_id
+        )
+        return GraphNode(
+            id=node_id,
+            type=NodeType.ASSIGNMENT,
+            name=", ".join(var_names) if var_names else "assignment",
+            value=assign_text[:100],
+            file=filename,
+            line=ts_node.start_point[0] + 1,
+            column=ts_node.start_point[1],
+            source_code=assign_text,
+            metadata=metadata
+        )
     
     def _extract_identifier(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract identifier (symbol reference)"""
-        name = source_code[ts_node.start_byte:ts_node.end_byte]
+        name = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
         
         # Register as symbol reference (use)
         self._register_symbol(name, node_id, is_declaration=False, is_read=True)
@@ -690,6 +873,68 @@ class CPGParser:
             source_code=name,
             metadata=metadata
         )
+
+    def _extract_parameters(
+        self,
+        ts_node: TSNode,
+        parent_id: str,
+        source_code: str,
+        filename: str,
+        language: LanguageType
+    ) -> List[GraphNode]:
+        """Extract parameter nodes from a function/method/arrow function."""
+        param_nodes: List[GraphNode] = []
+
+        def collect_identifiers(node: TSNode, out: List[TSNode]):
+            if node.type == "identifier":
+                out.append(node)
+                return
+            for child in node.children:
+                collect_identifiers(child, out)
+
+        # Common parameter containers across languages
+        param_containers = [c for c in ts_node.children if c.type in ("formal_parameters", "parameters", "parameter_list")]
+
+        # Arrow function single-identifier parameter (e.g., x => x)
+        if not param_containers:
+            for child in ts_node.children:
+                if child.type == "identifier":
+                    param_containers.append(child)
+                    break
+
+        identifiers: List[TSNode] = []
+        for container in param_containers:
+            if container.type == "identifier":
+                identifiers.append(container)
+            else:
+                collect_identifiers(container, identifiers)
+
+        for ident_node in identifiers:
+            name = self._slice_source(ident_node.start_byte, ident_node.end_byte, source_code)
+            if not name:
+                continue
+            node_id = self._next_id()
+            # Register symbol as declaration (parameter)
+            self._register_symbol(name, node_id, is_declaration=True)
+            metadata = NodeMetadata(
+                language=language.value,
+                scope_id=self.current_scope_id,
+                symbol_name=name
+            )
+            param_nodes.append(
+                GraphNode(
+                    id=node_id,
+                    type=NodeType.PARAMETER,
+                    name=name,
+                    file=filename,
+                    line=ident_node.start_point[0] + 1,
+                    column=ident_node.start_point[1],
+                    source_code=name,
+                    metadata=metadata
+                )
+            )
+
+        return param_nodes
     
     # Helper methods
     
@@ -699,6 +944,7 @@ class CPGParser:
             "program", "source_file",  # Root nodes
             "(", ")", "{", "}", "[", "]", ",", ";", ":",  # Punctuation
             "comment", "//", "/*", "*/",  # Comments
+            "function",  # Keyword token nodes in JS/TS
         }
         return node_type in skip_types
     
@@ -706,7 +952,7 @@ class CPGParser:
         """Find text of first child with given type"""
         for child in ts_node.children:
             if child.type == child_type:
-                return source_code[child.start_byte:child.end_byte]
+                return self._slice_source(child.start_byte, child.end_byte, source_code)
         return None
     
     def _enter_scope(self, scope_id: str, scope_type: str, ts_node: TSNode, name: str):

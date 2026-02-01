@@ -103,6 +103,15 @@ class ScanService:
             ".ts": "typescript",
             ".tsx": "typescript",
             ".jsx": "javascript",
+            ".html": "html",
+            ".htm": "html",
+            ".jinja": "html",
+            ".j2": "html",
+            ".ejs": "html",
+            ".hbs": "html",
+            ".handlebars": "html",
+            ".mustache": "html",
+            ".pug": "html",
         }.get(ext)
 
     def _collect_source_files(self, root: Path) -> list[Path]:
@@ -113,6 +122,43 @@ class ScanService:
                 if lang:
                     files.append(path)
         return files
+
+    def _normalize_repo_path(self, repo_root: Path, file_path: Optional[str]) -> Optional[str]:
+        if not file_path:
+            return None
+        try:
+            path_obj = Path(file_path)
+            if path_obj.is_absolute():
+                rel = path_obj.resolve().relative_to(repo_root.resolve())
+                return str(rel).replace("\\", "/")
+        except Exception:
+            pass
+        return str(file_path).replace("\\", "/")
+
+    def _filter_graph_for_file(
+        self,
+        graph_data: dict,
+        repo_root: Path,
+        rel_path: str
+    ) -> dict:
+        nodes = []
+        node_ids = set()
+        for node in graph_data.get("nodes", []):
+            file_prop = (node.get("properties") or {}).get("file")
+            normalized = self._normalize_repo_path(repo_root, file_prop)
+            if normalized == rel_path:
+                props = dict(node.get("properties") or {})
+                props["file"] = rel_path
+                node_copy = dict(node)
+                node_copy["properties"] = props
+                nodes.append(node_copy)
+                node_ids.add(node_copy.get("id"))
+
+        edges = [
+            edge for edge in graph_data.get("edges", [])
+            if edge.get("source") in node_ids and edge.get("target") in node_ids
+        ]
+        return {"nodes": nodes, "edges": edges}
 
     def _extract_archive(self, archive_path: Path, dest_dir: Path) -> None:
         if archive_path.suffix == ".zip":
@@ -353,17 +399,46 @@ class ScanService:
                 return
             await self._update_scan(scan_id, {"total_files": len(files), "progress": 20})
 
-            vulnerabilities: list[dict] = []
+            # Repository-level analysis (multi-file, interprocedural)
+            pipeline = get_pipeline(PipelineConfig(enable_llm=True))
+            repo_result = await pipeline.analyze_repository(
+                repo_path=str(repo_root),
+                file_paths=[str(p.relative_to(repo_root)).replace("\\", "/") for p in files],
+            )
+
+            vulnerabilities: list[dict] = repo_result.vulnerabilities
+            # Normalize vulnerability file paths to repo-relative for UI consistency
+            for vuln in vulnerabilities:
+                location = vuln.get("location") or {}
+                file_path = location.get("file")
+                normalized = self._normalize_repo_path(repo_root, file_path)
+                if normalized:
+                    location["file"] = normalized
+                    vuln["location"] = location
+            by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for vuln in vulnerabilities:
+                severity = vuln.get("severity", "low")
+                by_severity[severity] = by_severity.get(severity, 0) + 1
+
+            # Build per-file graph data for UI (no LLM, graph only)
             graph_files: dict[str, dict] = {}
             file_map: dict[str, str] = {}
             file_order: list[str] = []
-            by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            global_graph = repo_result.graph_data or {"nodes": [], "edges": []}
+
+            # Normalize global graph file paths to repo-relative for display
+            for node in global_graph.get("nodes", []):
+                props = node.get("properties") or {}
+                normalized = self._normalize_repo_path(repo_root, props.get("file"))
+                if normalized:
+                    props["file"] = normalized
+                    node["properties"] = props
+
             for i, file_path in enumerate(files):
-                rel_path = str(file_path.relative_to(repo_root))
+                rel_path = str(file_path.relative_to(repo_root)).replace("\\", "/")
                 file_id = f"file-{i + 1}"
                 file_map[file_id] = rel_path
                 file_order.append(file_id)
-                language = self._detect_language(file_path) or "text"
                 await self._update_scan(
                     scan_id,
                     {
@@ -371,24 +446,9 @@ class ScanService:
                         "files_scanned": i + 1,
                         "progress": 20 + int((i + 1) / max(len(files), 1) * 70),
                     },
-                    [f"[INFO] Scanning {rel_path}..."],
+                    [f"[INFO] Preparing graph for {rel_path}..."],
                 )
-                try:
-                    code = file_path.read_text(encoding="utf-8", errors="ignore")
-                    pipeline = get_pipeline(PipelineConfig(enable_llm=True))
-                    result = await pipeline.analyze_code(
-                        filename=rel_path,
-                        code=code,
-                        language=language,
-                    )
-                    if result.graph_data:
-                        graph_files[file_id] = result.graph_data
-                    for vuln in result.vulnerabilities:
-                        vulnerabilities.append(vuln)
-                        severity = vuln.get("severity", "low")
-                        by_severity[severity] = by_severity.get(severity, 0) + 1
-                except Exception as exc:
-                    await self._append_logs(scan_id, [f"[WARN] Failed to analyze {rel_path}: {exc}"])
+                graph_files[file_id] = self._filter_graph_for_file(global_graph, repo_root, rel_path)
 
             duration = time.time() - start_time
             summary = {
@@ -418,10 +478,11 @@ class ScanService:
                         "files": graph_files,
                         "file_map": file_map,
                         "file_order": file_order,
+                        "global": global_graph,
                     },
-                },
-                [f"[SUCCESS] Repository scan completed in {duration:.2f}s"],
-            )
+                    },
+                    [f"[SUCCESS] Repository scan completed in {duration:.2f}s"],
+                )
         except Exception as e:
             logger.error(f"Repository scan failed: {e}", exc_info=True)
             await self._update_scan(

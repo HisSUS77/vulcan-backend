@@ -21,6 +21,12 @@ from enum import Enum
 from pathlib import Path
 import re
 
+try:
+    from app.domain.analysis.universal_parser import UniversalParser, LanguageType, StandardNode
+    TREE_SITTER_HTML_AVAILABLE = True
+except Exception:
+    TREE_SITTER_HTML_AVAILABLE = False
+
 from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph, NodeMetadata
 from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
@@ -173,6 +179,7 @@ class HTMLParser:
         self.event_handlers: List[HTMLEventHandler] = []
         self.template_vars: List[TemplateVariable] = []
         self.script_blocks: List[Tuple[str, int]] = []
+        self.dom_sinks: List[Tuple[str, int]] = []
         
         # Graph nodes and edges
         self.nodes: List[GraphNode] = []
@@ -180,6 +187,14 @@ class HTMLParser:
         
         # Node ID counter
         self.node_counter = 0
+
+        # Tree-sitter parser (optional)
+        self.ts_parser: Optional[UniversalParser] = None
+        if TREE_SITTER_HTML_AVAILABLE:
+            try:
+                self.ts_parser = UniversalParser()
+            except Exception:
+                self.ts_parser = None
     
     def parse(self) -> SemanticGraph:
         """
@@ -188,13 +203,18 @@ class HTMLParser:
         Returns:
             SemanticGraph with HTML nodes and edges
         """
-        print(f"🔍 Parsing HTML: {Path(self.file_path).name} ({self.template_engine.value})")
+        print(f"Parsing HTML: {Path(self.file_path).name} ({self.template_engine.value})")
         
         # Extract elements
-        self._extract_forms()
-        self._extract_event_handlers()
-        self._extract_template_variables()
-        self._extract_script_blocks()
+        if self.ts_parser:
+            self._parse_with_tree_sitter()
+            # Template vars are still regex-based (engine-specific)
+            self._extract_template_variables()
+        else:
+            self._extract_forms()
+            self._extract_event_handlers()
+            self._extract_template_variables()
+            self._extract_script_blocks()
         
         # Build graph nodes
         self._build_nodes()
@@ -207,6 +227,23 @@ class HTMLParser:
             nodes=self.nodes,
             edges=self.edges
         )
+
+    def _parse_with_tree_sitter(self):
+        """Parse HTML using tree-sitter and populate forms/inputs/events."""
+        root = self.ts_parser.parse_code(self.content, LanguageType.HTML, self.file_path)
+        if not root:
+            self._extract_forms()
+            self._extract_event_handlers()
+            self._extract_script_blocks()
+            return
+
+        def walk(node: StandardNode):
+            if node.type == "element":
+                self._handle_element_node(node)
+            for child in node.children:
+                walk(child)
+
+        walk(root)
     
     def _detect_template_engine(self) -> TemplateEngine:
         """Detect template engine from file extension and content"""
@@ -373,6 +410,102 @@ class HTMLParser:
             line_num = self.content[:match.start()].count('\n') + 1
             
             self.script_blocks.append((script_content, line_num))
+            for sink in ("innerHTML", "outerHTML", "document.write", "dangerouslySetInnerHTML"):
+                if sink in script_content:
+                    self.dom_sinks.append((sink, line_num))
+
+    # ==============================
+    # Tree-sitter HTML helpers
+    # ==============================
+
+    def _handle_element_node(self, node: 'StandardNode'):
+        """Handle a tree-sitter HTML element node."""
+        start_tag = self._extract_start_tag(node)
+        if not start_tag:
+            return
+
+        tag_name = self._parse_tag_name(start_tag)
+        attrs = self._parse_attributes(start_tag)
+        line_number = node.start_point[0] + 1
+
+        if tag_name == "form":
+            action = attrs.get("action", "")
+            method = attrs.get("method", "GET").upper()
+            form_node_id = self._generate_node_id()
+            self.forms.append(HTMLForm(
+                action=action,
+                method=method,
+                inputs=[],
+                node_id=form_node_id,
+                line_number=line_number,
+                is_ajax=False
+            ))
+        elif tag_name in ("input", "textarea", "select"):
+            name = attrs.get("name", tag_name)
+            input_type = attrs.get("type", "text") if tag_name == "input" else tag_name
+            input_node_id = self._generate_node_id()
+            input_obj = HTMLInput(
+                name=name,
+                input_type=input_type,
+                node_id=input_node_id,
+                line_number=line_number,
+                default_value=attrs.get("value"),
+                is_required="required" in attrs
+            )
+            self.inputs.append(input_obj)
+            if self.forms:
+                self.forms[-1].inputs.append(input_obj)
+        elif tag_name == "button":
+            input_node_id = self._generate_node_id()
+            input_obj = HTMLInput(
+                name=attrs.get("name", "button"),
+                input_type="button",
+                node_id=input_node_id,
+                line_number=line_number,
+                default_value=attrs.get("value"),
+                is_required=False
+            )
+            self.inputs.append(input_obj)
+            if self.forms:
+                self.forms[-1].inputs.append(input_obj)
+
+        # Event handlers (DOM XSS)
+        for attr, value in attrs.items():
+            if attr.lower().startswith("on") and value:
+                handler_id = self._generate_node_id()
+                self.event_handlers.append(HTMLEventHandler(
+                    event_type=attr.lower(),
+                    handler_code=value,
+                    node_id=handler_id,
+                    element_type=tag_name,
+                    line_number=line_number
+                ))
+
+        # Script blocks
+        if tag_name == "script":
+            if node.source_code:
+                self.script_blocks.append((node.source_code, line_number))
+
+    def _extract_start_tag(self, node: 'StandardNode') -> Optional[str]:
+        """Extract the start tag source from an element node."""
+        for child in node.children:
+            if child.type == "start_tag":
+                return child.source_code
+        return node.source_code
+
+    def _parse_tag_name(self, start_tag: str) -> str:
+        match = re.search(r'<\s*([a-zA-Z0-9:_-]+)', start_tag)
+        return match.group(1).lower() if match else ""
+
+    def _parse_attributes(self, start_tag: str) -> Dict[str, str]:
+        attrs: Dict[str, str] = {}
+        pattern = r"([:@\w-]+)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+))?"
+        for match in re.finditer(pattern, start_tag):
+            key = match.group(1)
+            value = match.group(2) or ""
+            value = value.strip("\"'")
+            attrs[key] = value
+        return attrs
     
     def _build_nodes(self):
         """Build graph nodes from parsed elements"""
@@ -437,7 +570,9 @@ class HTMLParser:
                 value={
                     'html_node_type': HTMLNodeType.HTML_EVENT_HANDLER.value,
                     'event_type': handler.event_type,
-                    'handler_code': handler.handler_code
+                    'handler_code': handler.handler_code,
+                    'onclick': handler.handler_code if handler.event_type == "onclick" else None,
+                    'action': None
                 }
             )
             self.nodes.append(node)
@@ -460,6 +595,26 @@ class HTMLParser:
                     'template_var': template_var.variable_name,
                     'is_safe_output': template_var.is_safe,
                     'template_engine': template_var.engine.value
+                }
+            )
+            self.nodes.append(node)
+
+        # DOM sink nodes from script blocks
+        for sink_name, line_num in self.dom_sinks:
+            node = GraphNode(
+                id=self._generate_node_id(),
+                type=NodeType.DOM_PROPERTY,
+                name=sink_name,
+                file=self.file_path,
+                line=line_num,
+                column=0,
+                metadata=NodeMetadata(
+                    security_role="sink"
+                ),
+                source_code=sink_name,
+                value={
+                    'html_node_type': HTMLNodeType.HTML_SCRIPT_TAG.value,
+                    'dom_sink': sink_name
                 }
             )
             self.nodes.append(node)
