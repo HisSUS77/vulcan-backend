@@ -6,7 +6,11 @@
     "cwe": "CWE-89",
     "description": "User input flows to SQL execution without parameterization",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -29,21 +33,27 @@
       "process.argv"
     ],
     "sinks": [
-      "execute",
       "executemany",
       "raw",
       "cursor.execute",
       "connection.execute",
       "db.execute",
       "Model.objects.raw",
-      "query",
       "sequelize.query",
       "knex.raw",
       "db.query",
       "connection.query"
     ],
-    "patterns": ["DFG_FLOW", "TAINT_FLOW"],
-    "sanitizers": ["parameterized", "escape", "quote", "prepare"],
+    "patterns": [
+      "DFG_FLOW",
+      "TAINT_FLOW"
+    ],
+    "sanitizers": [
+      "parameterized",
+      "escape",
+      "quote",
+      "prepare"
+    ],
     "confidence": "high"
   },
   "COMMAND_INJECTION": {
@@ -53,7 +63,11 @@
     "cwe": "CWE-78",
     "description": "User input flows to system command execution",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -73,14 +87,60 @@
       "subprocess.Popen",
       "subprocess.run",
       "os.popen",
-      "eval",
-      "exec",
       "child_process.exec",
       "child_process.spawn",
       "child_process.execSync"
     ],
-    "patterns": ["DFG_FLOW", "TAINT_FLOW"],
-    "sanitizers": ["shlex.quote", "shell=False", "allowlist"],
+    "patterns": [
+      "DFG_FLOW",
+      "TAINT_FLOW"
+    ],
+    "sanitizers": [
+      "shlex.quote",
+      "shell=False",
+      "allowlist"
+    ],
+    "confidence": "high"
+  },
+  "CODE_INJECTION": {
+    "rule_id": "CODE_INJECTION",
+    "name": "Code Injection",
+    "owasp": "A03",
+    "cwe": "CWE-95",
+    "description": "User input flows to code evaluation or dynamic execution",
+    "severity": "critical",
+    "languages": [
+      "python"
+    ],
+    "sources": [
+      "request.GET",
+      "request.POST",
+      "request.args",
+      "request.form",
+      "request.json",
+      "request.data",
+      "req.query",
+      "req.body",
+      "req.params",
+      "input",
+      "sys.argv",
+      "process.argv"
+    ],
+    "sinks": [
+      "eval",
+      "exec",
+      "execfile",
+      "compile",
+      "__import__"
+    ],
+    "patterns": [
+      "DFG_FLOW",
+      "TAINT_FLOW"
+    ],
+    "sanitizers": [
+      "ast.literal_eval",
+      "json.loads"
+    ],
     "confidence": "high"
   },
   "XSS": {
@@ -90,7 +150,11 @@
     "cwe": "CWE-79",
     "description": "User input rendered in HTML without escaping",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -112,8 +176,15 @@
       "document.write",
       "dangerouslySetInnerHTML"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["escape", "html.escape", "DOMPurify", "sanitize"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "escape",
+      "html.escape",
+      "DOMPurify",
+      "sanitize"
+    ],
     "confidence": "medium"
   },
   "PATH_TRAVERSAL": {
@@ -123,7 +194,11 @@
     "cwe": "CWE-22",
     "description": "User input used in file path without validation",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -145,8 +220,15 @@
       "fs.writeFileSync",
       "path.join"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["os.path.abspath", "os.path.realpath", "path.resolve", "allowlist"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "os.path.abspath",
+      "os.path.realpath",
+      "path.resolve",
+      "allowlist"
+    ],
     "confidence": "high"
   },
   "SSRF": {
@@ -156,7 +238,11 @@
     "cwe": "CWE-918",
     "description": "User-controlled URL used in server-side requests",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -177,8 +263,14 @@
       "http.get",
       "https.get"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["allowlist", "urlparse", "URL"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "allowlist",
+      "urlparse",
+      "URL"
+    ],
     "confidence": "medium"
   },
   "BROKEN_ACCESS_CONTROL": {
@@ -188,7 +280,11 @@
     "cwe": "CWE-639",
     "description": "Missing or inadequate authorization checks",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -202,7 +298,9 @@
       "findById",
       "findOne"
     ],
-    "patterns": ["DFG_FLOW AND NOT exists(auth_check)"],
+    "patterns": [
+      "DFG_FLOW AND NOT exists(auth_check)"
+    ],
     "required_guards": [
       "@login_required",
       "@permission_required",
@@ -219,7 +317,11 @@
     "cwe": "CWE-502",
     "description": "Untrusted data deserialized without validation",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -232,12 +334,15 @@
       "pickle.load",
       "yaml.load",
       "yaml.unsafe_load",
-      "eval",
-      "JSON.parse",
-      "Function"
+      "JSON.parse"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["yaml.safe_load", "json.loads"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "yaml.safe_load",
+      "json.loads"
+    ],
     "confidence": "high"
   },
   "WEAK_CRYPTO": {
@@ -247,7 +352,11 @@
     "cwe": "CWE-327",
     "description": "Use of weak cryptographic algorithms",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "javascript",
+      "typescript",
+      "python"
+    ],
     "sources": [],
     "sinks": [
       "hashlib.md5",
@@ -257,8 +366,19 @@
       "crypto.createHash('md5')",
       "crypto.createHash('sha1')"
     ],
-    "patterns": ["CALL(md5)", "CALL(sha1)", "CALL(DES)", "CALL(RC4)"],
-    "blacklisted_algos": ["md5", "sha1", "DES", "RC4", "ECB"],
+    "patterns": [
+      "CALL(md5)",
+      "CALL(sha1)",
+      "CALL(DES)",
+      "CALL(RC4)"
+    ],
+    "blacklisted_algos": [
+      "md5",
+      "sha1",
+      "DES",
+      "RC4",
+      "ECB"
+    ],
     "confidence": "high"
   },
   "HARDCODED_SECRETS": {
@@ -268,10 +388,16 @@
     "cwe": "CWE-798",
     "description": "Secrets hardcoded in source code",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
-    "patterns": ["LITERAL(password|secret|key|token|api_key) AND ASSIGNMENT"],
+    "patterns": [
+      "LITERAL(password|secret|key|token|api_key) AND ASSIGNMENT"
+    ],
     "regex_patterns": [
       "password\\s*=\\s*['\"]\\w+",
       "api_key\\s*=\\s*['\"]\\w+",
@@ -287,11 +413,22 @@
     "cwe": "CWE-489",
     "description": "Debug mode enabled exposing sensitive information",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
-    "patterns": ["ASSIGNMENT(debug) AND LITERAL(True)", "ASSIGNMENT(DEBUG) AND LITERAL(true)"],
-    "dangerous_settings": ["DEBUG = True", "debug: true", "app.debug = True"],
+    "patterns": [
+      "ASSIGNMENT(debug) AND LITERAL(True)",
+      "ASSIGNMENT(DEBUG) AND LITERAL(true)"
+    ],
+    "dangerous_settings": [
+      "DEBUG = True",
+      "debug: true",
+      "app.debug = True"
+    ],
     "regex_patterns": [
       "DEBUG\\s*=\\s*True",
       "debug\\s*=\\s*true",
@@ -306,7 +443,11 @@
     "cwe": "CWE-90",
     "description": "User input in LDAP queries",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.GET",
       "request.POST",
@@ -321,8 +462,12 @@
       "search_s",
       "search_st"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["escape_filter_chars"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "escape_filter_chars"
+    ],
     "confidence": "medium"
   },
   "XML_INJECTION": {
@@ -332,7 +477,11 @@
     "cwe": "CWE-611",
     "description": "Unsafe XML parsing with external entities enabled",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.data",
       "request.body",
@@ -344,9 +493,16 @@
       "XMLParser",
       "xml2js.parseString"
     ],
-    "patterns": ["DFG_FLOW"],
-    "required_settings": ["resolve_entities=False", "no_network=True"],
-    "sanitizers": ["defusedxml"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "required_settings": [
+      "resolve_entities=False",
+      "no_network=True"
+    ],
+    "sanitizers": [
+      "defusedxml"
+    ],
     "confidence": "medium"
   },
   "MASS_ASSIGNMENT": {
@@ -356,7 +512,11 @@
     "cwe": "CWE-915",
     "description": "Unrestricted object property assignment from user input",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.json",
       "request.form",
@@ -371,7 +531,9 @@
       "update",
       "update_attributes"
     ],
-    "patterns": ["DFG_FLOW AND NOT exists(field_filter)"],
+    "patterns": [
+      "DFG_FLOW AND NOT exists(field_filter)"
+    ],
     "confidence": "low"
   },
   "CORS_MISCONFIGURATION": {
@@ -381,11 +543,21 @@
     "cwe": "CWE-942",
     "description": "Overly permissive CORS policy",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
-    "patterns": ["ASSIGNMENT(Access-Control-Allow-Origin) AND LITERAL(*)", "CORS(origins=['*'])"],
-    "dangerous_values": ["Access-Control-Allow-Origin: *", "origins=['*']"],
+    "patterns": [
+      "ASSIGNMENT(Access-Control-Allow-Origin) AND LITERAL(*)",
+      "CORS(origins=['*'])"
+    ],
+    "dangerous_values": [
+      "Access-Control-Allow-Origin: *",
+      "origins=['*']"
+    ],
     "regex_patterns": [
       "Access-Control-Allow-Origin.*\\*",
       "cors\\(.*origin:\\s*['\"]\\*['\"]"
@@ -399,12 +571,24 @@
     "cwe": "CWE-208",
     "description": "Non-constant-time comparison of secrets",
     "severity": "low",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
-    "patterns": ["IF(password == input) OR IF(token == input)"],
-    "dangerous_comparisons": ["==", "!="],
-    "required_functions": ["hmac.compare_digest", "secrets.compare_digest"],
+    "patterns": [
+      "IF(password == input) OR IF(token == input)"
+    ],
+    "dangerous_comparisons": [
+      "==",
+      "!="
+    ],
+    "required_functions": [
+      "hmac.compare_digest",
+      "secrets.compare_digest"
+    ],
     "confidence": "medium"
   },
   "EVAL_CODE_INJECTION": {
@@ -414,7 +598,11 @@
     "cwe": "CWE-95",
     "description": "User input passed to eval() function",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.args",
       "request.json",
@@ -424,13 +612,11 @@
     ],
     "sinks": [
       "eval",
-      "exec",
-      "compile",
-      "execfile",
-      "Function",
-      "__import__"
+      "Function"
     ],
-    "patterns": ["DFG_FLOW"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
     "sanitizers": [],
     "confidence": "high"
   },
@@ -441,7 +627,11 @@
     "cwe": "CWE-1336",
     "description": "User input in server-side template",
     "severity": "critical",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.args",
       "request.form",
@@ -456,8 +646,13 @@
       "Handlebars.compile",
       "template"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["escape", "autoescape"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "escape",
+      "autoescape"
+    ],
     "confidence": "high"
   },
   "NOSQL_INJECTION": {
@@ -467,7 +662,11 @@
     "cwe": "CWE-943",
     "description": "User input flows to NoSQL query",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.json",
       "req.body",
@@ -475,15 +674,19 @@
       "request.args"
     ],
     "sinks": [
-      "find",
       "findOne",
       "update",
       "remove",
       "collection.find",
       "db.collection"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["sanitize", "validate"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "sanitize",
+      "validate"
+    ],
     "confidence": "medium"
   },
   "INSECURE_RANDOM": {
@@ -493,7 +696,11 @@
     "cwe": "CWE-330",
     "description": "Use of predictable random number generator for security",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [
       "random.random",
@@ -502,8 +709,16 @@
       "Math.random"
     ],
     "patterns": [],
-    "contexts": ["token", "session", "password", "key"],
-    "sanitizers": ["secrets", "crypto.randomBytes"],
+    "contexts": [
+      "token",
+      "session",
+      "password",
+      "key"
+    ],
+    "sanitizers": [
+      "secrets",
+      "crypto.randomBytes"
+    ],
     "confidence": "medium"
   },
   "UNVALIDATED_REDIRECT": {
@@ -513,7 +728,11 @@
     "cwe": "CWE-601",
     "description": "User input controls redirect destination",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.args",
       "request.form",
@@ -527,8 +746,13 @@
       "window.location",
       "location.href"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["is_safe_url", "validateRedirect"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "is_safe_url",
+      "validateRedirect"
+    ],
     "confidence": "medium"
   },
   "JWT_WEAK_SECRET": {
@@ -538,7 +762,11 @@
     "cwe": "CWE-326",
     "description": "JWT signed with weak or hardcoded secret",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [
       "jwt.encode",
@@ -559,7 +787,11 @@
     "cwe": "CWE-347",
     "description": "JWT configured to accept 'none' algorithm",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -577,7 +809,10 @@
     "cwe": "CWE-1321",
     "description": "User input can pollute object prototype",
     "severity": "high",
-    "languages": ["javascript", "typescript"],
+    "languages": [
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "req.query",
       "req.body",
@@ -590,8 +825,12 @@
       "_.merge",
       "_.extend"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["Object.freeze"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "Object.freeze"
+    ],
     "confidence": "medium"
   },
   "BUFFER_OVERFLOW": {
@@ -601,7 +840,10 @@
     "cwe": "CWE-120",
     "description": "User input controls buffer size",
     "severity": "high",
-    "languages": ["javascript", "typescript"],
+    "languages": [
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "req.query",
       "req.body"
@@ -610,8 +852,12 @@
       "Buffer.allocUnsafe",
       "Buffer.from"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["Buffer.alloc"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "Buffer.alloc"
+    ],
     "confidence": "medium"
   },
   "GRAPHQL_INJECTION": {
@@ -621,18 +867,25 @@
     "cwe": "CWE-89",
     "description": "User input flows to GraphQL query",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.json",
       "req.body"
     ],
     "sinks": [
       "graphql",
-      "execute",
       "execute_graphql"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["validate_query"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "validate_query"
+    ],
     "confidence": "medium"
   },
   "LOG_INJECTION": {
@@ -642,7 +895,11 @@
     "cwe": "CWE-117",
     "description": "User input flows to logging without sanitization",
     "severity": "low",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.args",
       "request.headers",
@@ -657,8 +914,12 @@
       "console.log",
       "console.error"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["sanitize_log"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "sanitize_log"
+    ],
     "confidence": "low"
   },
   "UNRESTRICTED_FILE_UPLOAD": {
@@ -668,7 +929,11 @@
     "cwe": "CWE-434",
     "description": "File upload without type validation",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.files",
       "req.files"
@@ -679,8 +944,13 @@
       "writeFile",
       "writeFileSync"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["validate_file_type", "allowed_file"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "validate_file_type",
+      "allowed_file"
+    ],
     "confidence": "medium"
   },
   "INSECURE_COOKIE": {
@@ -690,7 +960,11 @@
     "cwe": "CWE-614",
     "description": "Cookie set without secure flag",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -698,7 +972,10 @@
       "set_cookie\\([^)]*\\)",
       "res\\.cookie\\([^)]*\\)"
     ],
-    "sanitizers": ["secure=True", "httpOnly=True"],
+    "sanitizers": [
+      "secure=True",
+      "httpOnly=True"
+    ],
     "confidence": "low"
   },
   "SESSION_FIXATION": {
@@ -708,11 +985,18 @@
     "cwe": "CWE-384",
     "description": "Session ID not regenerated after authentication",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
-    "required_after_login": ["session.regenerate", "session.rotate"],
+    "required_after_login": [
+      "session.regenerate",
+      "session.rotate"
+    ],
     "sanitizers": [],
     "confidence": "low"
   },
@@ -723,7 +1007,11 @@
     "cwe": "CWE-598",
     "description": "Password transmitted in URL parameter",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -741,7 +1029,11 @@
     "cwe": "CWE-319",
     "description": "HTTP used instead of HTTPS for sensitive data",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -760,7 +1052,11 @@
     "cwe": "CWE-295",
     "description": "SSL certificate validation disabled",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -779,7 +1075,11 @@
     "cwe": "CWE-22",
     "description": "Zip extraction without path validation",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.files"
     ],
@@ -789,8 +1089,12 @@
       "extract",
       "unzip"
     ],
-    "patterns": ["DFG_FLOW"],
-    "sanitizers": ["validate_path"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
+    "sanitizers": [
+      "validate_path"
+    ],
     "confidence": "high"
   },
   "REGEX_DOS": {
@@ -800,7 +1104,11 @@
     "cwe": "CWE-1333",
     "description": "User input used in regex with potential catastrophic backtracking",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "request.args",
       "request.json",
@@ -813,7 +1121,9 @@
       "re.search",
       "new RegExp"
     ],
-    "patterns": ["DFG_FLOW"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
     "sanitizers": [],
     "confidence": "low"
   },
@@ -824,7 +1134,11 @@
     "cwe": "CWE-209",
     "description": "Detailed error messages exposed to user",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -843,12 +1157,23 @@
     "cwe": "CWE-770",
     "description": "Authentication endpoint without rate limiting",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
-    "endpoints_requiring_rate_limit": ["/login", "/auth", "/password/reset"],
-    "required_decorators": ["@limiter.limit", "@rateLimit"],
+    "endpoints_requiring_rate_limit": [
+      "/login",
+      "/auth",
+      "/password/reset"
+    ],
+    "required_decorators": [
+      "@limiter.limit",
+      "@rateLimit"
+    ],
     "sanitizers": [],
     "confidence": "low"
   },
@@ -859,7 +1184,11 @@
     "cwe": "CWE-200",
     "description": "Sensitive data exposed in response",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [
       "password",
       "secret",
@@ -874,7 +1203,9 @@
       "res.json",
       "res.send"
     ],
-    "patterns": ["DFG_FLOW"],
+    "patterns": [
+      "DFG_FLOW"
+    ],
     "sanitizers": [],
     "confidence": "medium"
   },
@@ -885,11 +1216,17 @@
     "cwe": "CWE-1021",
     "description": "X-Frame-Options header not set",
     "severity": "low",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
-    "required_headers": ["X-Frame-Options"],
+    "required_headers": [
+      "X-Frame-Options"
+    ],
     "sanitizers": [],
     "confidence": "medium"
   },
@@ -900,7 +1237,11 @@
     "cwe": "CWE-329",
     "description": "Hardcoded IV used in encryption",
     "severity": "high",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
@@ -908,7 +1249,10 @@
       "iv\\s*=\\s*b?['\"][^'\"]+['\"]",
       "initializationVector.*['\"][^'\"]+['\"]"
     ],
-    "sanitizers": ["os.urandom", "crypto.randomBytes"],
+    "sanitizers": [
+      "os.urandom",
+      "crypto.randomBytes"
+    ],
     "confidence": "medium"
   },
   "INSUFFICIENT_ENTROPY": {
@@ -918,7 +1262,11 @@
     "cwe": "CWE-331",
     "description": "Weak random number generation for security purposes",
     "severity": "medium",
-    "languages": ["python", "javascript", "typescript"],
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
     "sources": [],
     "sinks": [
       "random.choice",
@@ -926,8 +1274,16 @@
       "Math.random"
     ],
     "patterns": [],
-    "contexts": ["token", "session", "password", "key"],
-    "sanitizers": ["secrets", "crypto.randomBytes"],
+    "contexts": [
+      "token",
+      "session",
+      "password",
+      "key"
+    ],
+    "sanitizers": [
+      "secrets",
+      "crypto.randomBytes"
+    ],
     "confidence": "medium"
   },
   "RACE_CONDITION_FILE": {
@@ -937,13 +1293,427 @@
     "cwe": "CWE-367",
     "description": "File checked then used without locking",
     "severity": "medium",
-    "languages": ["python"],
+    "languages": [
+      "python"
+    ],
     "sources": [],
     "sinks": [],
     "patterns": [],
-    "toctou_patterns": ["os.path.exists", "os.access"],
-    "sanitizers": ["fcntl.flock"],
+    "toctou_patterns": [
+      "os.path.exists",
+      "os.access"
+    ],
+    "sanitizers": [
+      "fcntl.flock"
+    ],
+    "confidence": "low"
+  },
+  "VULNERABLE_COMPONENTS": {
+    "rule_id": "VULNERABLE_COMPONENTS",
+    "name": "Vulnerable or Outdated Components",
+    "owasp": "A06",
+    "cwe": "CWE-1104",
+    "description": "Dependency versions that are unpinned or use risky version ranges in manifest files",
+    "severity": "medium",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?m)^\\s*\"[^\"]+\"\\s*:\\s*\"(?:\\*|latest)\"",
+      "(?m)^\\s*\"[^\"]+\"\\s*:\\s*\"(?:git\\+|github:|git://|http://|https://)",
+      "(?m)^[A-Za-z0-9_.-]+\\s*@\\s*(?:git\\+|https?://|ssh://).*$"
+    ],
+    "file_patterns": [
+      "(?i)(^|/)requirements(?:[-_].+)?\\\\.txt$",
+      "(?i)(^|/)pipfile(\\\\.lock)?$",
+      "(?i)(^|/)pyproject\\\\.toml$",
+      "(?i)(^|/)poetry\\\\.lock$",
+      "(?i)(^|/)setup\\\\.cfg$",
+      "(?i)(^|/)package\\\\.json$",
+      "(?i)(^|/)package-lock\\\\.json$",
+      "(?i)(^|/)npm-shrinkwrap\\\\.json$",
+      "(?i)(^|/)yarn\\\\.lock$",
+      "(?i)(^|/)pnpm-lock\\\\.yaml$"
+    ],
+    "confidence": "medium"
+  },
+  "ADMIN_ROUTE_UNPROTECTED": {
+    "rule_id": "ADMIN_ROUTE_UNPROTECTED",
+    "name": "Admin Route Without Explicit Guard",
+    "owasp": "A01",
+    "cwe": "CWE-285",
+    "description": "Admin route defined without explicit auth guard in the same line",
+    "severity": "medium",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)@app\\\\.route\\\\([^\\n]*?/admin",
+      "(?i)@router\\\\.get\\\\([^\\n]*?/admin",
+      "(?i)app\\\\.(get|post|put|delete)\\\\([^\\n]*?/admin"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "low"
+  },
+  "A06_NPM_RESOLVED_HTTP": {
+    "rule_id": "A06_NPM_RESOLVED_HTTP",
+    "name": "NPM Resolved URL Over HTTP",
+    "owasp": "A06",
+    "cwe": "CWE-494",
+    "description": "Dependency resolved over insecure HTTP in lockfiles",
+    "severity": "medium",
+    "languages": [
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)\"resolved\"\\\\s*:\\\\s*\"http://"
+    ],
+    "file_patterns": [
+      "(?i)(^|/)package-lock\\\\.json$",
+      "(?i)(^|/)npm-shrinkwrap\\\\.json$",
+      "(?i)(^|/)yarn\\\\.lock$",
+      "(?i)(^|/)pnpm-lock\\\\.yaml$"
+    ],
+    "confidence": "medium"
+  },
+  "A06_NPM_REGISTRY_HTTP": {
+    "rule_id": "A06_NPM_REGISTRY_HTTP",
+    "name": "NPM Registry Over HTTP",
+    "owasp": "A06",
+    "cwe": "CWE-494",
+    "description": "NPM registry configured with HTTP",
+    "severity": "medium",
+    "languages": [
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?im)^registry\\\\s*=\\\\s*http://"
+    ],
+    "file_patterns": [
+      "(?i)(^|/)\\\\.npmrc$"
+    ],
+    "confidence": "medium"
+  },
+  "A06_PYTHON_VCS_DEP": {
+    "rule_id": "A06_PYTHON_VCS_DEP",
+    "name": "Python VCS Dependency",
+    "owasp": "A06",
+    "cwe": "CWE-494",
+    "description": "Python dependency pulled from VCS URL",
+    "severity": "medium",
+    "languages": [
+      "python"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?m)^(?:-e\\\\s+)?(?:git\\\\+|hg\\\\+|svn\\\\+|bzr\\\\+).*$"
+    ],
+    "file_patterns": [
+      "(?i)(^|/)requirements(?:[-_].+)?\\\\.txt$",
+      "(?i)(^|/)pipfile$",
+      "(?i)(^|/)pyproject\\\\.toml$"
+    ],
+    "confidence": "medium"
+  },
+  "A06_PIPFILE_VCS": {
+    "rule_id": "A06_PIPFILE_VCS",
+    "name": "Pipfile VCS Dependency",
+    "owasp": "A06",
+    "cwe": "CWE-494",
+    "description": "Pipfile dependency uses VCS source",
+    "severity": "medium",
+    "languages": [
+      "python"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?m)^\\\\w+\\\\s*=\\\\s*\\\\{[^\\n]*?(git|hg|svn|bzr)\\\\s*="
+    ],
+    "file_patterns": [
+      "(?i)(^|/)pipfile$"
+    ],
+    "confidence": "medium"
+  },
+  "DEFAULT_CREDENTIALS": {
+    "rule_id": "DEFAULT_CREDENTIALS",
+    "name": "Default Credentials",
+    "owasp": "A07",
+    "cwe": "CWE-521",
+    "description": "Hardcoded default credential pairs",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)\\\"(admin|root|test)\\\"\\s*:\\s*\\\"(admin|root|password|1234|123456)\\\"",
+      "(?i)(admin|root)\\s*[:=]\\s*[\\\"\\'](admin|root|password|1234|123456)[\\\"\\']"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx|json|yaml|yml)$"
+    ],
+    "confidence": "medium"
+  },
+  "REMOTE_SCRIPT_EXECUTION": {
+    "rule_id": "REMOTE_SCRIPT_EXECUTION",
+    "name": "Remote Script Execution",
+    "owasp": "A08",
+    "cwe": "CWE-494",
+    "description": "Remote script fetched and executed directly",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)(curl|wget)\\\\s+[^\\n]*\\\\|\\\\s*(sh|bash)",
+      "(?i)Invoke-WebRequest\\\\s+[^\\n]*\\\\|\\\\s*iex"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx|sh|ps1)$"
+    ],
+    "confidence": "high"
+  },
+  "UNTRUSTED_BINARY_EXEC": {
+    "rule_id": "UNTRUSTED_BINARY_EXEC",
+    "name": "Untrusted Binary Execution",
+    "owasp": "A08",
+    "cwe": "CWE-494",
+    "description": "Downloads a binary and executes it without verification",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)(curl|wget)\\\\s+[^\\n]*-o\\\\s+[^\\n]+\\\\n[^\\n]*(chmod\\\\s+\\\\+x|\\\\.\\\\/)",
+      "(?i)download\\\\w*\\\\([^\\n]*\\\\);\\\\s*(exec|spawn)\\\\w*\\\\("
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx|sh)$"
+    ],
+    "confidence": "medium"
+  },
+  "LOGGING_DISABLED": {
+    "rule_id": "LOGGING_DISABLED",
+    "name": "Logging Disabled",
+    "owasp": "A09",
+    "cwe": "CWE-778",
+    "description": "Logging explicitly disabled",
+    "severity": "medium",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)logging\\\\.disable\\\\(",
+      "(?i)logger\\\\.disabled\\\\s*=\\\\s*True",
+      "(?i)console\\\\.(log|error|warn)\\\\s*=\\\\s*null"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "medium"
+  },
+  "SENSITIVE_LOGGING": {
+    "rule_id": "SENSITIVE_LOGGING",
+    "name": "Sensitive Data in Logs",
+    "owasp": "A09",
+    "cwe": "CWE-532",
+    "description": "Passwords/tokens written to logs",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)(logger\\\\.|logging\\\\.)\\\\w+\\\\([^\\n]*(password|token|secret)",
+      "(?i)console\\\\.(log|error|warn)\\\\([^\\n]*(password|token|secret)"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "medium"
+  },
+  "EXCEPT_PASS_NO_LOG": {
+    "rule_id": "EXCEPT_PASS_NO_LOG",
+    "name": "Exceptions Suppressed Without Logging",
+    "owasp": "A09",
+    "cwe": "CWE-391",
+    "description": "Exceptions ignored without logging",
+    "severity": "medium",
+    "languages": [
+      "python"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?im)^\\\\s*except\\\\s+.*:\\\\s*\\\\n\\\\s*pass\\\\s*$"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.py$"
+    ],
+    "confidence": "low"
+  },
+  "HTTP_ERROR_HANDLER_SILENT": {
+    "rule_id": "HTTP_ERROR_HANDLER_SILENT",
+    "name": "HTTP Error Handler Without Logging",
+    "owasp": "A09",
+    "cwe": "CWE-391",
+    "description": "Error handler returns response without logging",
+    "severity": "low",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)@app\\\\.errorhandler\\\\([^\\n]*\\\\):",
+      "(?i)app\\\\.use\\\\([^\\n]*error\\\\)"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "low"
+  },
+  "AWS_METADATA_ACCESS": {
+    "rule_id": "AWS_METADATA_ACCESS",
+    "name": "AWS Metadata Endpoint Access",
+    "owasp": "A10",
+    "cwe": "CWE-918",
+    "description": "Direct access to AWS metadata IP",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)169\\\\.254\\\\.169\\\\.254"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "high"
+  },
+  "GCP_METADATA_ACCESS": {
+    "rule_id": "GCP_METADATA_ACCESS",
+    "name": "GCP Metadata Endpoint Access",
+    "owasp": "A10",
+    "cwe": "CWE-918",
+    "description": "Direct access to GCP metadata host",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)metadata\\\\.google\\\\.internal"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "high"
+  },
+  "AZURE_METADATA_ACCESS": {
+    "rule_id": "AZURE_METADATA_ACCESS",
+    "name": "Azure Metadata Endpoint Access",
+    "owasp": "A10",
+    "cwe": "CWE-918",
+    "description": "Direct access to Azure metadata endpoint",
+    "severity": "high",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)169\\\\.254\\\\.169\\\\.254/metadata/instance"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
+    "confidence": "high"
+  },
+  "IMDS_TOKENLESS": {
+    "rule_id": "IMDS_TOKENLESS",
+    "name": "IMDSv1 Tokenless Request",
+    "owasp": "A10",
+    "cwe": "CWE-918",
+    "description": "IMDS request without required token header",
+    "severity": "medium",
+    "languages": [
+      "python",
+      "javascript",
+      "typescript"
+    ],
+    "sources": [],
+    "sinks": [],
+    "patterns": [],
+    "regex_patterns": [
+      "(?i)X-aws-ec2-metadata-token"
+    ],
+    "file_patterns": [
+      "(?i)\\\\.(py|js|ts|tsx)$"
+    ],
     "confidence": "low"
   }
 }
-

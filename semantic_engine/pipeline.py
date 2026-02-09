@@ -157,11 +157,14 @@ class SemanticPipeline:
 
             # Step 3: Execute security queries (augment discovery results)
             query_slices = await self._execute_queries(graph, code)
-            all_slices.extend(query_slices)
+            if discovery_slices:
+                discovery_slices = self._filter_discovery_slices(discovery_slices, query_slices)
+            all_slices = (discovery_slices or []) + query_slices
             logger.info(f"Query execution: {len(query_slices)} slices found")
             
             # Step 4: Classify with LLM
             vulnerabilities = await self._classify_slices(all_slices)
+            vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
             logger.info(f"Classification: {len(vulnerabilities)} vulnerabilities confirmed")
             
             # Step 5: Build result
@@ -303,24 +306,38 @@ class SemanticPipeline:
                 if allowed and rel_path not in allowed:
                     continue
                 try:
-                    source_code_map[file_path] = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                    code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                    source_code_map[file_path] = code
+                    source_code_map[rel_path] = code
+                    # Add repo-relative path for flexible matching
+                    try:
+                        repo_rel = str(Path(file_path).resolve().relative_to(Path(repo_path).resolve()))
+                        repo_rel = repo_rel.replace("\\", "/")
+                        source_code_map[repo_rel] = code
+                    except Exception:
+                        pass
                 except Exception:
                     continue
+
+            # Add dependency manifests for A06 (Vulnerable & Outdated Components)
+            self._add_dependency_files(repo_path, source_code_map, allowed)
 
             # Broad path discovery
             all_slices = []
             if self.config.enable_path_discovery:
                 discovery_slices = await self._discover_paths(graph, source_code_map)
-                all_slices.extend(discovery_slices)
                 logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
 
             # Always augment with rule-based queries (use concatenated source if needed)
             concat_source = "\n".join(source_code_map.values()) if source_code_map else ""
             query_slices = await self._execute_queries(graph, concat_source, source_code_map)
-            all_slices.extend(query_slices)
+            if discovery_slices:
+                discovery_slices = self._filter_discovery_slices(discovery_slices, query_slices)
+            all_slices = (discovery_slices or []) + query_slices
             logger.info(f"Query execution: {len(query_slices)} slices found")
 
             vulnerabilities = await self._classify_slices(all_slices)
+            vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
             analysis_time = time.time() - start_time
 
             graph_data = self._serialize_graph(graph)
@@ -345,6 +362,51 @@ class SemanticPipeline:
             return self._create_error_result(
                 "repository", "multi", "", warnings, [str(e)]
             )
+
+    def _add_dependency_files(
+        self,
+        repo_path: str,
+        source_code_map: Dict[str, str],
+        allowed: set
+    ) -> None:
+        """Add dependency manifests/locks to source map for regex-based rules."""
+        repo_root = Path(repo_path)
+        file_names = {
+            "requirements.txt",
+            "requirements-dev.txt",
+            "pipfile",
+            "pipfile.lock",
+            "pyproject.toml",
+            "poetry.lock",
+            "setup.cfg",
+            ".npmrc",
+            "package.json",
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "yarn.lock",
+            "pnpm-lock.yaml"
+        }
+        exclude_dirs = {"node_modules", "venv", ".venv", ".git", "__pycache__", "dist", "build"}
+
+        for path in repo_root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.name not in file_names:
+                continue
+            if any(part in exclude_dirs for part in path.parts):
+                continue
+
+            rel_path = str(path.relative_to(repo_root)).replace("\\", "/")
+            if allowed and rel_path not in allowed:
+                continue
+            try:
+                code = path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            abs_path = str(path)
+            source_code_map.setdefault(abs_path, code)
+            source_code_map.setdefault(rel_path, code)
 
     def build_graph_data(
         self,
@@ -373,6 +435,81 @@ class SemanticPipeline:
             List of classified vulnerabilities (filtered for true positives)
         """
         return await self.classifier.classify_slices(slices)
+
+    def _filter_discovery_slices(
+        self,
+        discovery_slices: List[CodeSlice],
+        query_slices: List[CodeSlice]
+    ) -> List[CodeSlice]:
+        """
+        Remove discovery slices that are already covered by rule-based slices.
+        """
+        covered = set()
+        for s in query_slices:
+            loc = s.location or {}
+            covered.add((
+                loc.get("file"),
+                loc.get("start_line"),
+                loc.get("end_line"),
+                s.sink_label
+            ))
+
+        filtered = []
+        for s in discovery_slices:
+            loc = s.location or {}
+            key = (
+                loc.get("file"),
+                loc.get("start_line"),
+                loc.get("end_line"),
+                s.sink_label
+            )
+            if key in covered:
+                continue
+            filtered.append(s)
+        return filtered
+
+    def _dedupe_vulnerabilities(
+        self,
+        vulnerabilities: List[ClassifiedVulnerability]
+    ) -> List[ClassifiedVulnerability]:
+        """
+        Collapse duplicate findings that point to the same rule + sink at the same location.
+        Keep the most "sure" finding while avoiding noisy duplicates.
+        """
+        if not vulnerabilities:
+            return vulnerabilities
+
+        severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+
+        def rank(v: ClassifiedVulnerability) -> tuple:
+            sev = severity_rank.get((v.final_severity or "").lower(), 0)
+            conf = v.final_confidence or 0.0
+            llm_value = getattr(v.llm_classification, "value", v.llm_classification)
+            if llm_value == "VULNERABLE":
+                strength = 2
+            elif llm_value == "LIKELY_VULNERABLE":
+                strength = 1
+            else:
+                strength = 0
+            has_snippet = 1 if (v.code_snippet or "").strip() else 0
+            path_len = len(v.path_nodes or [])
+            return (strength, has_snippet, conf, sev, -path_len)
+
+        best_by_key: dict[tuple, ClassifiedVulnerability] = {}
+        for v in vulnerabilities:
+            loc = v.location or {}
+            key = (
+                v.rule_name,
+                loc.get("file"),
+                loc.get("start_line"),
+                loc.get("end_line"),
+                v.sink_label,
+            )
+            existing = best_by_key.get(key)
+            if existing is None or rank(v) > rank(existing):
+                best_by_key[key] = v
+
+        return list(best_by_key.values())
     
     def _detect_cycles(self, graph: SemanticGraph) -> bool:
         """

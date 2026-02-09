@@ -4,6 +4,7 @@ Executes static security queries against unified code property graph.
 Finds source→sink paths, extracts minimal code slices for LLM classification.
 """
 import re
+import os
 from typing import List, Dict, Set, Optional, Tuple
 from dataclasses import dataclass
 from collections import defaultdict, deque
@@ -156,8 +157,23 @@ class QueryExecutor:
         if source_code_map:
             files = source_code_map
 
+        file_filters = getattr(query, "file_patterns", None)
+        if file_filters:
+            compiled_filters = []
+            for fp in file_filters:
+                try:
+                    compiled_filters.append(re.compile(fp))
+                except re.error:
+                    continue
+        else:
+            compiled_filters = []
+
         slices: List[CodeSlice] = []
         for file_path, code in files.items():
+            if compiled_filters:
+                normalized = (file_path or "").replace("\\", "/")
+                if not any(rx.search(normalized) for rx in compiled_filters):
+                    continue
             lines = code.split("\n")
             for pattern in patterns:
                 try:
@@ -214,6 +230,8 @@ class QueryExecutor:
         sources = []
         
         for node in graph.nodes:
+            if not self._language_allows_node(node, query):
+                continue
             # Check if node matches any source pattern
             for source_pattern in query.sources:
                 if self._matches_pattern(node, source_pattern):
@@ -238,9 +256,11 @@ class QueryExecutor:
         sinks = []
         
         for node in graph.nodes:
+            if not self._language_allows_node(node, query):
+                continue
             # Check if node matches any sink pattern
             for sink_pattern in query.sinks:
-                if self._matches_pattern(node, sink_pattern):
+                if self._matches_sink_pattern(node, sink_pattern):
                     sinks.append(node)
                     break
         
@@ -259,13 +279,23 @@ class QueryExecutor:
         """
         # Get node label (use name or fallback to id)
         node_label = node.name or node.id
+        label_lower = node_label.lower()
+        pattern_lower = pattern.lower()
         
         # Special pattern: PARAMETER matches any function parameter
         if pattern == 'PARAMETER' and node.type == NodeType.PARAMETER:
-            return True
+            name = (node.name or "").lower()
+            if node.metadata and getattr(node.metadata, "security_role", None) == "source":
+                return True
+            common = {
+                "input", "user_input", "data", "payload", "body", "query", "params",
+                "username", "password", "token", "auth", "user", "userid", "id"
+            }
+            return name in common
         
         # Check node label
-        if pattern.lower() in node_label.lower():
+        # Token-aware match to avoid false positives (e.g., exec vs execute)
+        if self._label_matches_pattern(label_lower, pattern_lower):
             return True
         
         # Check node type for common patterns
@@ -273,24 +303,95 @@ class QueryExecutor:
             return True
         
         # Subscripts like sys.argv are common sources
-        if node.type == NodeType.SUBSCRIPT and pattern.lower() in node_label.lower():
+        if node.type == NodeType.SUBSCRIPT and pattern_lower in label_lower:
             return True
         
         if pattern in ['execute', 'query'] and node.type == NodeType.CALL_EXPRESSION:
-            return 'execute' in node_label.lower() or 'query' in node_label.lower()
+            return self._label_matches_pattern(label_lower, pattern_lower)
         
         # Check value field if available
         if hasattr(node, 'value') and node.value:
-            if pattern.lower() in str(node.value).lower():
+            if pattern_lower in str(node.value).lower():
                 return True
         
         # Check metadata if available
         if hasattr(node, 'metadata') and node.metadata:
             metadata_str = str(node.metadata).lower()
-            if pattern.lower() in metadata_str:
+            if pattern_lower in metadata_str:
                 return True
         
         return False
+
+    def _matches_sink_pattern(self, node: GraphNode, pattern: str) -> bool:
+        """
+        Stricter sink matching to reduce false positives.
+        Only checks node label/type and avoids metadata/value substring matches.
+        """
+        node_label = node.name or node.id
+        label_lower = node_label.lower()
+        pattern_lower = pattern.lower()
+
+        if pattern == 'PARAMETER' and node.type == NodeType.PARAMETER:
+            return True
+
+        if self._label_matches_pattern(label_lower, pattern_lower):
+            return True
+
+        if node.type == NodeType.SUBSCRIPT and pattern_lower in label_lower:
+            return True
+
+        if pattern in ['execute', 'query'] and node.type == NodeType.CALL_EXPRESSION:
+            return self._label_matches_pattern(label_lower, pattern_lower)
+
+        return False
+
+    def _language_allows_node(self, node: GraphNode, query: QueryRule) -> bool:
+        languages = getattr(query, "languages", None)
+        if not languages:
+            return True
+        file_path = (node.file or "").lower()
+        if not file_path:
+            return True
+        if file_path.endswith(".py"):
+            return "python" in [l.lower() for l in languages]
+        if file_path.endswith(".js"):
+            return "javascript" in [l.lower() for l in languages]
+        if file_path.endswith(".ts"):
+            return "typescript" in [l.lower() for l in languages]
+        if file_path.endswith(".tsx"):
+            return "typescript" in [l.lower() for l in languages] or "javascript" in [l.lower() for l in languages]
+        return True
+
+    def _label_matches_pattern(self, label_lower: str, pattern_lower: str) -> bool:
+        """
+        Token-aware matching for node labels.
+        Avoids substring matches like exec vs execute.
+        """
+        if not pattern_lower:
+            return False
+
+        # Exact substring match for fully-qualified patterns
+        if any(ch in pattern_lower for ch in [".", "(", ")", "'", "\""]):
+            return pattern_lower in label_lower
+
+        # Strip leading dots like ".get"
+        if pattern_lower.startswith("."):
+            pattern_lower = pattern_lower[1:]
+
+        # Tokenize on non-alphanumerics and dots
+        tokens = []
+        current = []
+        for ch in label_lower:
+            if ch.isalnum() or ch == "_":
+                current.append(ch)
+            else:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+        if current:
+            tokens.append("".join(current))
+
+        return pattern_lower in tokens
     
     def _find_paths(
         self,
@@ -441,9 +542,17 @@ class QueryExecutor:
     
     def _is_sanitizer(self, node: GraphNode, sanitizers: Set[str]) -> bool:
         """Check if node represents a sanitizer function."""
-        node_label = node.name or node.id
+        if not sanitizers:
+            return False
+        node_label = (node.name or node.id or "").lower()
+        node_code = (node.source_code or "").lower()
+        if node.metadata and getattr(node.metadata, "security_role", None) == "sanitizer":
+            return True
         for sanitizer in sanitizers:
-            if sanitizer.lower() in node_label.lower():
+            sanitizer_lower = sanitizer.lower()
+            if self._label_matches_pattern(node_label, sanitizer_lower):
+                return True
+            if sanitizer_lower in node_code:
                 return True
         return False
     
@@ -497,12 +606,18 @@ class QueryExecutor:
         
         # Determine file for snippet extraction
         file_path = (source_node.file or sink_node.file or "input")
-        file_source = source_code
-        if source_code_map and file_path in source_code_map:
-            file_source = source_code_map[file_path]
+        file_source = self._resolve_file_source(file_path, source_code, source_code_map)
 
         # Extract code snippet with context (+/-3 lines)
         snippet = self._extract_code_snippet(file_source, line_numbers, context=3)
+        if not snippet and (source_node.source_code or sink_node.source_code):
+            # Fallback: use node source_code if we couldn't map lines to file
+            parts = []
+            if source_node.source_code:
+                parts.append(f"SOURCE: {source_node.source_code}")
+            if sink_node.source_code:
+                parts.append(f"SINK: {sink_node.source_code}")
+            snippet = "\n".join(parts).strip()
         
         # Determine location
         min_line = min(line_numbers) if line_numbers else 1
@@ -524,8 +639,11 @@ class QueryExecutor:
         slice_id = f"{query.rule_id}_{source_node.id}_{sink_node.id}"
         
         confidence = query.confidence
+        severity = query.severity
         if sanitizer_hits:
             confidence = "low"
+            if severity.lower() in {"critical", "high"}:
+                severity = "medium"
 
         return CodeSlice(
             slice_id=slice_id,
@@ -533,7 +651,7 @@ class QueryExecutor:
             rule_name=query.name,
             owasp=query.owasp,
             cwe=query.cwe,
-            severity=query.severity,
+            severity=severity,
             confidence=confidence,
             source_node_id=source_node.id,
             sink_node_id=sink_node.id,
@@ -591,6 +709,41 @@ class QueryExecutor:
             snippet_lines.append(f"{prefix}{line_num:4d} | {lines[i]}")
         
         return "\n".join(snippet_lines)
+
+    def _resolve_file_source(
+        self,
+        file_path: str,
+        fallback_source: str,
+        source_code_map: Optional[Dict[str, str]] = None
+    ) -> str:
+        """
+        Resolve file source from source_code_map or disk, with robust path matching.
+        """
+        if source_code_map:
+            # Exact match
+            if file_path in source_code_map:
+                return source_code_map[file_path]
+
+            # Normalized slash match
+            norm_path = file_path.replace("\\", "/")
+            if norm_path in source_code_map:
+                return source_code_map[norm_path]
+
+            # Suffix match (handle relative vs absolute)
+            for key, code in source_code_map.items():
+                key_norm = key.replace("\\", "/")
+                if key_norm.endswith(norm_path):
+                    return code
+
+        # Disk fallback if file exists
+        try:
+            if file_path and os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    return f.read()
+        except Exception:
+            pass
+
+        return fallback_source
     
     def _generate_reason(
         self,
@@ -612,33 +765,48 @@ class QueryExecutor:
     
     def _deduplicate_slices(self, slices: List[CodeSlice]) -> List[CodeSlice]:
         """
-        Remove duplicate slices and rank by severity.
-        
-        Args:
-            slices: List of code slices
-        
-        Returns:
-            Deduplicated and sorted list
+        Remove duplicate slices (same rule + sink + location) and rank by certainty.
+        Prefer "sure" evidence without multiplying near-identical findings.
         """
-        seen = set()
-        unique_slices = []
-        
+        best_by_key = {}
+
+        def confidence_score(conf: str) -> float:
+            scores = {"high": 0.9, "medium": 0.6, "low": 0.3}
+            return scores.get((conf or "").lower(), 0.5)
+
+        def rank(s: CodeSlice) -> tuple:
+            severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+            sev = severity_order.get((s.severity or "").lower(), 4)
+            conf = confidence_score(s.confidence)
+            has_snippet = 1 if (s.code_snippet or "").strip() else 0
+            is_dfg = 1 if "DFG_FLOW" in (s.pattern_type or "") else 0
+            path_len = len(s.path_nodes or [])
+            # Higher is better except severity/path_len which are inverted via negatives
+            return (is_dfg, has_snippet, conf, -sev, -path_len)
+
         for slice_obj in slices:
-            # Create unique key
+            location = slice_obj.location or {}
             key = (
                 slice_obj.rule_id,
-                slice_obj.source_node_id,
-                slice_obj.sink_node_id
+                slice_obj.sink_label,
+                location.get("file"),
+                location.get("start_line"),
+                location.get("end_line")
             )
-            
-            if key not in seen:
-                seen.add(key)
-                unique_slices.append(slice_obj)
-        
-        # Sort by severity
+
+            existing = best_by_key.get(key)
+            if not existing or rank(slice_obj) > rank(existing):
+                best_by_key[key] = slice_obj
+
+        unique_slices = list(best_by_key.values())
+
+        # Sort by severity (most severe first), then confidence
         severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
         unique_slices.sort(
-            key=lambda s: severity_order.get(s.severity.lower(), 4)
+            key=lambda s: (
+                severity_order.get((s.severity or "").lower(), 4),
+                -confidence_score(s.confidence)
+            )
         )
-        
+
         return unique_slices
