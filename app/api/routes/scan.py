@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
+import os
 
 from semantic_engine.pipeline import get_pipeline, PipelineConfig
 
@@ -191,7 +192,8 @@ async def scan_health():
                 "by_severity": stats["by_severity"],
                 "by_owasp": stats["by_owasp"]
             },
-            "llm_enabled": get_pipeline().config.enable_llm
+            "llm_enabled": get_pipeline().config.enable_llm,
+            "llm_key_set": bool(os.getenv("LLM_API_KEY"))
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")

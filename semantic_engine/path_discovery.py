@@ -106,9 +106,9 @@ class PathDiscovery:
 
         for node in graph.nodes:
             node_label = (node.name or node.id).lower()
-            if any(p.lower() in node_label for p in source_patterns):
+            if any(self._label_matches_pattern(node_label, p.lower()) for p in source_patterns):
                 sources.append(node)
-            if any(p.lower() in node_label for p in sink_patterns):
+            if any(self._label_matches_pattern(node_label, p.lower()) for p in sink_patterns):
                 sinks.append(node)
             if node.metadata and node.metadata.security_role == "source":
                 if node not in sources:
@@ -118,6 +118,28 @@ class PathDiscovery:
                     sinks.append(node)
 
         return sources, sinks, sanitizers
+
+    def _label_matches_pattern(self, label_lower: str, pattern_lower: str) -> bool:
+        if not pattern_lower:
+            return False
+        if any(ch in pattern_lower for ch in [".", "(", ")", "'", "\""]):
+            return pattern_lower in label_lower
+        if pattern_lower.startswith("."):
+            pattern_lower = pattern_lower[1:]
+
+        tokens = []
+        current = []
+        for ch in label_lower:
+            if ch.isalnum() or ch == "_":
+                current.append(ch)
+            else:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+        if current:
+            tokens.append("".join(current))
+
+        return pattern_lower in tokens
 
     def _build_adjacency(self, graph: SemanticGraph) -> Tuple[Dict[str, List[str]], Dict[Tuple[str, str], List[EdgeType]]]:
         edge_types = {
@@ -171,9 +193,17 @@ class PathDiscovery:
         return paths
 
     def _is_sanitizer(self, node: GraphNode, sanitizers: Set[str]) -> bool:
-        node_label = (node.name or node.id).lower()
+        if not sanitizers:
+            return False
+        label = (node.name or node.id or "").lower()
+        code = (node.source_code or "").lower()
+        if node.metadata and node.metadata.security_role == "sanitizer":
+            return True
         for s in sanitizers:
-            if s.lower() in node_label:
+            s_lower = s.lower()
+            if self._label_matches_pattern(label, s_lower):
+                return True
+            if s_lower in code:
                 return True
         return False
 
@@ -241,7 +271,7 @@ class PathDiscovery:
             if node.metadata and node.metadata.security_role == "sanitizer":
                 explicit_hits += 1
                 continue
-            if any(s in label or s in code for s in sanitizer_set):
+            if any(self._label_matches_pattern(label, s) or s in code for s in sanitizer_set):
                 heuristic_hits += 1
         return explicit_hits, heuristic_hits
 

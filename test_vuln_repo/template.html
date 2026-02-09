@@ -1,0 +1,12 @@
+﻿<!-- template.html - XSS/template patterns -->
+<html>
+  <body>
+    <div id="out"></div>
+    <script>
+      const name = new URLSearchParams(location.search).get('name');
+      document.write(name);
+      document.getElementById('out').innerHTML = name;
+    </script>
+    {{ user_input }}
+  </body>
+</html>

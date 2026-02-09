@@ -64,6 +64,11 @@ class LLMService:
         self.model = model or os.getenv('LLM_MODEL_CLASSIFIER', 'meta/Llama-4-Scout-17B-16E-Instruct')
         self.base_url = base_url or os.getenv('LLM_BASE_URL')
         self.timeout = timeout
+        self._response_cache: Dict[str, LLMClassificationResult] = {}
+        self._min_interval_sec = float(os.getenv("LLM_MIN_INTERVAL_MS", "250")) / 1000.0
+        self._semaphore = asyncio.Semaphore(int(os.getenv("LLM_MAX_CONCURRENCY", "1")))
+        self._last_call_ts = 0.0
+        self._rate_lock = asyncio.Lock()
         
         # Load system prompt
         self.system_prompt = self._load_system_prompt()
@@ -200,6 +205,10 @@ class LLMService:
         Returns:
             LLMClassificationResult with classification and details
         """
+        if not code_snippet or not code_snippet.strip():
+            logger.warning("Empty code snippet - skipping LLM call")
+            return self._get_fallback_result(rule_name, owasp, cwe)
+
         if not self.client:
             logger.warning("LLM client not initialized, trying fallbacks...")
             return await self._try_fallbacks(
@@ -212,18 +221,20 @@ class LLMService:
             code_snippet, rule_name, rule_description,
             source_label, sink_label, owasp, cwe
         )
+        cache_key = self._cache_key(prompt)
+        cached = self._response_cache.get(cache_key)
+        if cached:
+            return cached
         
         try:
             # Call LLM with timeout
             logger.info(f"Calling {self.current_provider} for vulnerability classification...")
-            response = await asyncio.wait_for(
-                self._call_llm(prompt),
-                timeout=self.timeout
-            )
+            response = await self._call_with_retries(prompt)
             
             # Parse response
             result = self._parse_response(response, rule_name, owasp, cwe)
             logger.info(f"{self.current_provider} classification: {result.classification}")
+            self._response_cache[cache_key] = result
             return result
             
         except asyncio.TimeoutError:
@@ -267,14 +278,13 @@ class LLMService:
                 )
                 
                 # Call LLM with timeout
-                response = await asyncio.wait_for(
-                    self._call_llm(prompt),
-                    timeout=self.timeout
-                )
+                response = await self._call_with_retries(prompt)
                 
                 # Parse response
                 result = self._parse_response(response, rule_name, owasp, cwe)
                 logger.info(f"Fallback {self.current_provider} succeeded: {result.classification}")
+                cache_key = self._cache_key(prompt)
+                self._response_cache[cache_key] = result
                 return result
                 
             except Exception as e:
@@ -284,6 +294,48 @@ class LLMService:
         # All providers failed, return pattern-based result
         logger.warning("All LLM providers failed, using pattern-based detection")
         return self._get_fallback_result(rule_name, owasp, cwe)
+
+    def _cache_key(self, prompt: str) -> str:
+        return str(hash(prompt))
+
+    async def _call_with_retries(self, prompt: str) -> str:
+        """
+        Call LLM with simple retry/backoff for rate limits/timeouts.
+        """
+        backoff = 1.0
+        last_err: Optional[Exception] = None
+        for attempt in range(5):
+            try:
+                async with self._semaphore:
+                    await self._enforce_min_interval()
+                    return await asyncio.wait_for(
+                        self._call_llm(prompt),
+                        timeout=self.timeout
+                    )
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                # Retry on rate limit / transient errors
+                if "too many requests" in msg or "rate limit" in msg or "429" in msg:
+                    logger.warning(f"LLM rate limited, retrying in {backoff:.1f}s (attempt {attempt + 1}/3)")
+                    await asyncio.sleep(backoff)
+                    backoff *= 2
+                    continue
+                raise
+        if last_err:
+            raise last_err
+        raise RuntimeError("LLM call failed after retries")
+
+    async def _enforce_min_interval(self):
+        """
+        Ensure a minimum interval between outbound LLM calls to avoid throttling.
+        """
+        async with self._rate_lock:
+            now = asyncio.get_event_loop().time()
+            wait = self._min_interval_sec - (now - self._last_call_ts)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call_ts = asyncio.get_event_loop().time()
     
     def _build_classification_prompt(
         self,

@@ -1,5 +1,9 @@
 from dotenv import load_dotenv
-load_dotenv()  # Load .env file before importing anything else
+from pathlib import Path
+
+# Load .env from project root (one level above app/)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
