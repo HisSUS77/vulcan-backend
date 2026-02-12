@@ -19,6 +19,7 @@ from app.enums.role import UserRole
 from app.schemas.scan import ScanStatusRead, ScanSummary
 from app.db.mongo import to_object_id
 from app.core.config import settings
+from app.patch_module.patch_repository import PatchRepository
 
 logger = logging.getLogger(__name__)
 
@@ -544,6 +545,30 @@ class ScanService:
             return None
         def _to_iso(value):
             return value.isoformat() if isinstance(value, datetime) else value
+        vulnerabilities = summary.get("vulnerabilities") or []
+        if vulnerabilities:
+            repo = PatchRepository(self.db)
+            vuln_ids = [v.get("id") for v in vulnerabilities if v.get("id")]
+            patches = await repo.list_by_vulnerability_ids(vuln_ids)
+            patch_map = {p.get("vulnerability_id"): p for p in patches}
+            for vuln in vulnerabilities:
+                patch = patch_map.get(vuln.get("id"))
+                if patch:
+                    validations = patch.get("validations") or []
+                    passed = sum(1 for v in validations if v.get("passed"))
+                    vuln["patch"] = {
+                        "status": patch.get("status"),
+                        "confidence": patch.get("confidence"),
+                        "validation_summary": f"{passed}/{len(validations)} passed",
+                        "patch_id": patch.get("patch_id"),
+                    }
+                else:
+                    vuln["patch"] = {
+                        "status": "none",
+                        "confidence": None,
+                        "validation_summary": "0/0 passed",
+                        "patch_id": None,
+                    }
         merged = {
             "scan_id": scan_id,
             "user_id": str(scan.get("user_id")),
@@ -559,7 +584,7 @@ class ScanService:
             "duration_seconds": summary.get("duration_seconds", 0.0),
             "created_at": _to_iso(summary.get("created_at", scan.get("created_at"))),
             "completed_at": _to_iso(summary.get("completed_at", scan.get("finished_at"))),
-            "vulnerabilities": summary.get("vulnerabilities"),
+            "vulnerabilities": vulnerabilities,
         }
         return ScanSummary(**merged)
 

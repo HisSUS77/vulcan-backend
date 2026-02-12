@@ -9,6 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.schemas.scan import ScanSummary
 from app.db.mongo import to_object_id
 from app.enums.role import UserRole
+from app.patch_module.patch_repository import PatchRepository
 logger = logging.getLogger(__name__)
 
 try:
@@ -96,7 +97,31 @@ class ReportService:
         summary = await self._get_summary(scan_id, user)
         if not summary:
             return None
-        
+        vulnerabilities = summary.vulnerabilities or []
+        # Attach patch status per vulnerability
+        if vulnerabilities:
+            repo = PatchRepository(self.db)
+            vuln_ids = [v.get("id") for v in vulnerabilities if v.get("id")]
+            patches = await repo.list_by_vulnerability_ids(vuln_ids)
+            patch_map = {p.get("vulnerability_id"): p for p in patches}
+            for vuln in vulnerabilities:
+                patch = patch_map.get(vuln.get("id"))
+                if patch:
+                    validations = patch.get("validations") or []
+                    passed = sum(1 for v in validations if v.get("passed"))
+                    vuln["patch"] = {
+                        "status": patch.get("status"),
+                        "confidence": patch.get("confidence"),
+                        "validation_summary": f"{passed}/{len(validations)} passed",
+                        "patch_id": patch.get("patch_id"),
+                    }
+                else:
+                    vuln["patch"] = {
+                        "status": "none",
+                        "confidence": None,
+                        "validation_summary": "0/0 passed",
+                        "patch_id": None,
+                    }
         return {
             "id": scan_id,
             "scan_id": scan_id,
@@ -107,7 +132,7 @@ class ReportService:
                 "medium": summary.by_severity.get("medium", 0),
                 "low": summary.by_severity.get("low", 0),
             },
-            "vulnerabilities": summary.vulnerabilities or [],
+            "vulnerabilities": vulnerabilities,
             "created_at": summary.created_at,
             "completed_at": summary.completed_at,
             "duration_seconds": summary.duration_seconds,

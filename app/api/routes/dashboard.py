@@ -7,6 +7,7 @@ from app.db.mongo import get_mongo_db, to_object_id
 from app.enums.role import UserRole
 from app.models.repository import Repository
 from app.services.notification_service import NotificationService
+from app.patch_module.patch_repository import PatchRepository
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -43,10 +44,31 @@ async def summary(
     repos = await session.execute(select(Repository))
     repo_count = len(list(repos.scalars().all()))
 
+    patch_query = {}
+    if user.get("role") != UserRole.ADMIN.value:
+        patch_query["user_id"] = user.get("id")
+    patch_repo = PatchRepository(db)
+    patch_cursor = patch_repo.patches.find(patch_query)
+    patches = await patch_cursor.to_list(length=1000)
+    total_patches = len(patches)
+    success_statuses = {"validated", "approved", "applied_pending", "applied"}
+    applied_statuses = {"applied_pending", "applied"}
+    successful = sum(1 for p in patches if p.get("status") in success_statuses)
+    applied = sum(1 for p in patches if p.get("status") in applied_statuses)
+    confidences = [p.get("confidence") for p in patches if isinstance(p.get("confidence"), (int, float))]
+    avg_confidence = round(sum(confidences) / len(confidences), 2) if confidences else 0.0
+    patch_success_rate = round(successful / total_patches, 2) if total_patches else 0.0
+
     return {
-        "totals": {"repos": repo_count, "scans": total_scans, "vulnerabilities": total_vulns},
+        "totals": {
+            "repos": repo_count,
+            "scans": total_scans,
+            "vulnerabilities": total_vulns,
+            "patches_total": total_patches,
+            "patches_applied": applied,
+        },
         "severity": severity,
-        "ai": {"patch_success_rate": 0.0, "avg_confidence": 0.0},
+        "ai": {"patch_success_rate": patch_success_rate, "avg_confidence": avg_confidence},
         "trend": [],
     }
 
