@@ -51,5 +51,23 @@ class Settings(BaseSettings):
 
     REPO_STORAGE_DIR: str = Field(default="repo_uploads")
 
+    ENABLE_LLM: bool = Field(default=True)
+    LLM_PROVIDER: str = Field(default="github")
+    LLM_API_KEY: str = Field(default="")
+    LLM_BASE_URL: str = Field(default="")
+    LLM_MODEL_CLASSIFIER: str = Field(default="gpt-4o-mini")
+
 
 settings = Settings()
+
+# Ensure LLM-related settings are available via os.environ for non-settings consumers.
+import os as _os
+_os.environ.setdefault("ENABLE_LLM", "true" if settings.ENABLE_LLM else "false")
+if settings.LLM_PROVIDER:
+    _os.environ.setdefault("LLM_PROVIDER", settings.LLM_PROVIDER)
+if settings.LLM_API_KEY:
+    _os.environ.setdefault("LLM_API_KEY", settings.LLM_API_KEY)
+if settings.LLM_BASE_URL:
+    _os.environ.setdefault("LLM_BASE_URL", settings.LLM_BASE_URL)
+if settings.LLM_MODEL_CLASSIFIER:
+    _os.environ.setdefault("LLM_MODEL_CLASSIFIER", settings.LLM_MODEL_CLASSIFIER)

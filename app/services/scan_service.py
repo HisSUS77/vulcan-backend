@@ -124,17 +124,86 @@ class ScanService:
                     files.append(path)
         return files
 
-    def _normalize_repo_path(self, repo_root: Path, file_path: Optional[str]) -> Optional[str]:
+    def _path_key(self, path: Optional[str]) -> str:
+        if not path:
+            return ""
+        normalized = str(path).replace("\\", "/")
+        return normalized.lower() if os.name == "nt" else normalized
+
+    def _normalize_repo_path(
+        self,
+        repo_root: Path,
+        file_path: Optional[str],
+        rel_paths: Optional[list[str]] = None,
+    ) -> Optional[str]:
         if not file_path:
             return None
+        path_str = str(file_path).replace("\\", "/")
         try:
-            path_obj = Path(file_path)
+            path_obj = Path(path_str)
             if path_obj.is_absolute():
                 rel = path_obj.resolve().relative_to(repo_root.resolve())
-                return str(rel).replace("\\", "/")
+                path_str = str(rel).replace("\\", "/")
         except Exception:
             pass
-        return str(file_path).replace("\\", "/")
+        repo_root_str = str(repo_root.resolve()).replace("\\", "/")
+        if path_str.startswith(repo_root_str + "/"):
+            path_str = path_str[len(repo_root_str) + 1 :]
+        if path_str.startswith("./"):
+            path_str = path_str[2:]
+        if rel_paths and (":" in path_str or path_str.startswith("/")):
+            norm = self._path_key(path_str)
+            best = None
+            for rel in rel_paths:
+                rel_norm = self._path_key(rel)
+                if norm.endswith("/" + rel_norm) or norm.endswith(rel_norm):
+                    if not best or len(rel_norm) > len(self._path_key(best)):
+                        best = rel
+            if best:
+                path_str = best
+        return path_str
+
+    def _dedupe_vulnerabilities(
+        self,
+        repo_root: Optional[Path],
+        vulnerabilities: list[dict],
+        rel_paths: Optional[list[str]] = None,
+    ) -> list[dict]:
+        if not vulnerabilities:
+            return []
+        deduped: list[dict] = []
+        seen: dict[tuple, dict] = {}
+        for vuln in vulnerabilities:
+            location = vuln.get("location") or {}
+            file_path = location.get("file")
+            if repo_root:
+                normalized = self._normalize_repo_path(repo_root, file_path, rel_paths)
+            else:
+                normalized = str(file_path).replace("\\", "/") if file_path else None
+            if normalized:
+                location["file"] = normalized
+                vuln["location"] = location
+            evidence = vuln.get("evidence") or {}
+            key = (
+                str(vuln.get("type") or ""),
+                self._path_key(normalized),
+                location.get("start_line"),
+                location.get("end_line"),
+                str(evidence.get("sink") or ""),
+                str(evidence.get("source") or ""),
+            )
+            existing = seen.get(key)
+            if existing:
+                existing_conf = existing.get("confidence") or 0
+                new_conf = vuln.get("confidence") or 0
+                if new_conf > existing_conf:
+                    idx = deduped.index(existing)
+                    deduped[idx] = vuln
+                    seen[key] = vuln
+                continue
+            seen[key] = vuln
+            deduped.append(vuln)
+        return deduped
 
     def _filter_graph_for_file(
         self,
@@ -144,16 +213,28 @@ class ScanService:
     ) -> dict:
         nodes = []
         node_ids = set()
+        has_file_info = False
         for node in graph_data.get("nodes", []):
             file_prop = (node.get("properties") or {}).get("file")
-            normalized = self._normalize_repo_path(repo_root, file_prop)
-            if normalized == rel_path:
-                props = dict(node.get("properties") or {})
-                props["file"] = rel_path
-                node_copy = dict(node)
-                node_copy["properties"] = props
-                nodes.append(node_copy)
-                node_ids.add(node_copy.get("id"))
+            if file_prop:
+                has_file_info = True
+            normalized = self._normalize_repo_path(repo_root, file_prop) if file_prop else None
+            if normalized:
+                norm_key = self._path_key(normalized)
+                rel_key = self._path_key(rel_path)
+                if (
+                    norm_key == rel_key
+                    or norm_key.endswith("/" + rel_key)
+                    or rel_key.endswith("/" + norm_key)
+                ):
+                    props = dict(node.get("properties") or {})
+                    props["file"] = rel_path
+                    node_copy = dict(node)
+                    node_copy["properties"] = props
+                    nodes.append(node_copy)
+                    node_ids.add(node_copy.get("id"))
+        if not nodes and not has_file_info:
+            return graph_data
 
         edges = [
             edge for edge in graph_data.get("edges", [])
@@ -261,7 +342,7 @@ class ScanService:
                     language=language,
                 )
 
-                vulnerabilities = result.vulnerabilities
+                vulnerabilities = self._dedupe_vulnerabilities(None, result.vulnerabilities)
                 by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
                 for vuln in vulnerabilities:
                     severity = vuln.get("severity", "low")
@@ -274,7 +355,7 @@ class ScanService:
                     "input_type": "DIRECT_CODE",
                     "total_files": 1,
                     "files_scanned": 1,
-                    "vulnerabilities_found": result.vulnerabilities_found,
+                    "vulnerabilities_found": len(vulnerabilities),
                     "by_severity": by_severity,
                     "duration_seconds": round(duration, 2),
                     "created_at": datetime.utcnow().isoformat(),
@@ -297,7 +378,7 @@ class ScanService:
                     [
                         f"[INFO] Graph built: {result.graph_nodes} nodes, {result.graph_edges} edges",
                         f"[INFO] Rules executed: {result.rules_executed}",
-                        f"[INFO] Vulnerabilities found: {result.vulnerabilities_found}",
+                        f"[INFO] Vulnerabilities found: {len(vulnerabilities)}",
                         f"[SUCCESS] Scan completed in {duration:.2f}s",
                     ],
                 )
@@ -407,12 +488,15 @@ class ScanService:
                 file_paths=[str(p.relative_to(repo_root)).replace("\\", "/") for p in files],
             )
 
-            vulnerabilities: list[dict] = repo_result.vulnerabilities
-            # Normalize vulnerability file paths to repo-relative for UI consistency
+            rel_paths = [str(p.relative_to(repo_root)).replace("\\", "/") for p in files]
+            vulnerabilities: list[dict] = self._dedupe_vulnerabilities(
+                repo_root, repo_result.vulnerabilities, rel_paths
+            )
+            # Normalize vulnerability file paths with suffix matching against repo files
             for vuln in vulnerabilities:
                 location = vuln.get("location") or {}
                 file_path = location.get("file")
-                normalized = self._normalize_repo_path(repo_root, file_path)
+                normalized = self._normalize_repo_path(repo_root, file_path, rel_paths)
                 if normalized:
                     location["file"] = normalized
                     vuln["location"] = location
@@ -430,7 +514,7 @@ class ScanService:
             # Normalize global graph file paths to repo-relative for display
             for node in global_graph.get("nodes", []):
                 props = node.get("properties") or {}
-                normalized = self._normalize_repo_path(repo_root, props.get("file"))
+                normalized = self._normalize_repo_path(repo_root, props.get("file"), rel_paths)
                 if normalized:
                     props["file"] = normalized
                     node["properties"] = props

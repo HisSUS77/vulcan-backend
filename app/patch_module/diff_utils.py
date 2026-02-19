@@ -145,22 +145,28 @@ def apply_unified_diff(original_text: str, diff_text: str) -> str:
         old_start, old_len, new_start, new_len = parse_hunk_header(hunk.header)
         # Copy unchanged lines before hunk
         while idx < old_start - 1:
+            if idx >= len(lines):
+                raise PatchValidationError("Diff hunk exceeds original text length")
             out_lines.append(lines[idx])
             idx += 1
         # Apply hunk
         for hline in hunk.lines:
             if hline.startswith(" "):
-                if idx < len(lines):
-                    out_lines.append(lines[idx])
+                if idx >= len(lines):
+                    raise PatchValidationError("Diff context line exceeds original text length")
+                out_lines.append(lines[idx])
                 idx += 1
             elif hline.startswith("-"):
+                if idx >= len(lines):
+                    raise PatchValidationError("Diff removal exceeds original text length")
                 idx += 1
             elif hline.startswith("+"):
                 out_lines.append(hline[1:])
             else:
                 # Unexpected line, treat as context
-                if idx < len(lines):
-                    out_lines.append(lines[idx])
+                if idx >= len(lines):
+                    raise PatchValidationError("Diff line exceeds original text length")
+                out_lines.append(lines[idx])
                 idx += 1
     # Append remaining lines
     out_lines.extend(lines[idx:])
