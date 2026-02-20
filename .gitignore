@@ -16,3 +16,6 @@ vulcan.db
 
 # VS Code settings (optional, keeps workspace settings local)
 .vscode/
+
+# CPG output files
+cpg_*.json
