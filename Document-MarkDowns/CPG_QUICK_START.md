@@ -48,19 +48,7 @@ print(f"✅ Found {len(cpg.symbol_table)} symbols")
    - Security analysis examples
    - Integration with Vulcan
 
-### For Migration from Old Parser
-3. **[CPG_MIGRATION_GUIDE.md](CPG_MIGRATION_GUIDE.md)** 🔄 MIGRATION GUIDE
-   - Step-by-step migration
-   - Before/after comparisons
-   - Testing strategies
-   - Troubleshooting
 
-### For Project Overview
-4. **[CPG_IMPLEMENTATION_SUMMARY.md](CPG_IMPLEMENTATION_SUMMARY.md)** 📊 SUMMARY
-   - What was built
-   - Code statistics
-   - Deliverables checklist
-   - Success metrics
 
 ---
 
@@ -89,8 +77,7 @@ vulcan-backend/
 ├── Document-MarkDowns/
 │   ├── CPG_PARSER_README.md               📖 Quick reference
 │   ├── CPG_PARSER_GUIDE.md                📖 Complete guide
-│   ├── CPG_MIGRATION_GUIDE.md             📖 Migration guide
-│   ├── CPG_IMPLEMENTATION_SUMMARY.md      📖 Project summary
+
 │   └── CPG_QUICK_START.md                 📖 This file
 │
 └── setup_grammars.py                      🔧 Grammar setup script
@@ -338,8 +325,7 @@ cpg = parser.parse_file("app.js", LanguageType.JAVASCRIPT)
 |---------------|----------|----------|
 | **Get Started** | CPG_PARSER_README.md | `cd Document-MarkDowns && cat CPG_PARSER_README.md` |
 | **Full Guide** | CPG_PARSER_GUIDE.md | See [complete guide](CPG_PARSER_GUIDE.md) |
-| **Migration** | CPG_MIGRATION_GUIDE.md | See [migration steps](CPG_MIGRATION_GUIDE.md) |
-| **Summary** | CPG_IMPLEMENTATION_SUMMARY.md | See [what was built](CPG_IMPLEMENTATION_SUMMARY.md) |
+
 | **Examples** | examples/cpg_examples.py | `python examples/cpg_examples.py` |
 
 ---
@@ -359,7 +345,7 @@ For production use:
 - [ ] Integrate with scan service
 
 For migration:
-- [ ] Read migration guide: [CPG_MIGRATION_GUIDE.md](CPG_MIGRATION_GUIDE.md)
+
 - [ ] Update imports
 - [ ] Test thoroughly
 - [ ] Remove old code

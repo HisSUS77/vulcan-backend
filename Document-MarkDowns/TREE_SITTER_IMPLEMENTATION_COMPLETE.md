@@ -30,7 +30,7 @@ The Vulcan backend now has a **production-grade, industry-standard parser** usin
 
 ### 4. **Documentation**
 - **TREE_SITTER_UNIVERSAL_PARSER.md**: Complete guide (50+ sections)
-- **TREE_SITTER_QUICK_REF.md**: Quick reference card
+- **TREE_SITTER_INSTALL.md**: Installation and setup guide
 - Deprecation warnings in old parser
 - Migration checklist and troubleshooting
 
@@ -74,7 +74,7 @@ vulcan-backend/
 │   └── test_universal_parser.py     # Comprehensive test suite (500+ lines)
 ├── Document-MarkDowns/
 │   └── TREE_SITTER_UNIVERSAL_PARSER.md  # Full documentation
-├── TREE_SITTER_QUICK_REF.md         # Quick reference
+├── TREE_SITTER_INSTALL.md           # Installation guide
 └── requirements.txt                  # Updated with tree-sitter
 ```
 
@@ -281,7 +281,7 @@ Tested on 1000-line JavaScript file with complex constructs:
 
 ### Included Documentation
 - `TREE_SITTER_UNIVERSAL_PARSER.md` - Full guide
-- `TREE_SITTER_QUICK_REF.md` - Quick reference
+- `TREE_SITTER_INSTALL.md` - Installation and setup
 - `test_universal_parser.py` - Live examples
 
 ### External Resources

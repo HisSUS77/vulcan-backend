@@ -35,8 +35,7 @@ examples/
 └── cpg_examples.py            # Comprehensive examples and tests
 
 Document-MarkDowns/
-├── CPG_PARSER_GUIDE.md        # Complete usage guide
-└── CPG_MIGRATION_GUIDE.md     # Migration from old parser
+└── CPG_PARSER_GUIDE.md        # Complete usage guide
 ```
 
 ## 🚀 Quick Start
@@ -364,7 +363,7 @@ class EnhancedScanService(ScanService):
 ## 📚 Documentation
 
 - **[CPG_PARSER_GUIDE.md](CPG_PARSER_GUIDE.md)**: Complete usage guide with examples
-- **[CPG_MIGRATION_GUIDE.md](CPG_MIGRATION_GUIDE.md)**: Migration from old regex-based parser
+- **CPG Parser Guide**: Complete implementation documentation
 - **[examples/cpg_examples.py](../examples/cpg_examples.py)**: Comprehensive test suite
 
 ## 🆚 Comparison to Other Tools

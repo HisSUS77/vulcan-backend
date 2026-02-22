@@ -220,7 +220,7 @@ vulcan-backend/
 │   ├── TREE_SITTER_IMPLEMENTATION_COMPLETE.md  # Summary
 │   └── TREE_SITTER_UNIVERSAL_PARSER.md         # Full guide
 │
-└── TREE_SITTER_QUICK_REF.md      # Quick reference
+
 ```
 
 ---

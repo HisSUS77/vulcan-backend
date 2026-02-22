@@ -1,6 +1,6 @@
 """
-Semantic Graph Builder - NEW ARCHITECTURE
-==========================================
+Semantic Graph Builder
+======================
 
 Uses tree-sitter based CPG parser + interprocedural DFG builder
 
@@ -8,10 +8,6 @@ Architecture:
 1. CPG Parser (tree-sitter) - AST extraction with full language support
 2. Interprocedural DFG - Data flow across function boundaries
 3. Taint Engine - Vulnerability detection
-
-MIGRATION NOTE:
-Old components (ast_parser_enhanced, cfg_builder, dfg_builder) have been
-removed in favor of the new CPG parser + interprocedural DFG approach.
 """
 
 from app.schemas.graph import SemanticGraph, GraphNode, GraphEdge

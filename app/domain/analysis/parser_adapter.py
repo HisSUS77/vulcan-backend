@@ -236,10 +236,10 @@ class StandardToGraphAdapter:
 
 class UniversalASTParser:
     """
-    Drop-in replacement for the old ASTParser that uses UniversalParser underneath.
+    AST Parser using UniversalParser with Tree-sitter.
     
-    This class maintains the same interface as the old ASTParser but uses
-    the new Tree-sitter based UniversalParser for better accuracy.
+    Provides a consistent interface for parsing multiple languages
+    into SemanticGraph format.
     
     Usage:
         parser = UniversalASTParser(language="python")
@@ -262,31 +262,21 @@ class UniversalASTParser:
         }
         
         self.lang_type = lang_map.get(self.language, LanguageType.PYTHON)
-        
-        try:
-            self.parser = UniversalParser()
-            self.adapter = StandardToGraphAdapter()
-            self.use_treesitter = True
-            logger.info(f"UniversalASTParser initialized with tree-sitter for {language}")
-        except Exception as e:
-            logger.error(f"Failed to initialize UniversalParser: {e}")
-            logger.error("Falling back to legacy parser")
-            self.use_treesitter = False
-            # Import legacy parser as fallback
-            from app.domain.analysis.ast_parser_enhanced import ASTParser
-            self.legacy_parser = ASTParser(language=language)
+        self.parser = UniversalParser()
+        self.adapter = StandardToGraphAdapter()
+        logger.info(f"UniversalASTParser initialized with tree-sitter for {language}")
     
     def parse(self, code: str, filename: str = "unknown") -> SemanticGraph:
         """
         Parse source code into AST nodes and edges.
         
-        This method signature matches the old ASTParser for compatibility.
+        Args:
+            code: Source code string
+            filename: Filename for context
+            
+        Returns:
+            SemanticGraph with nodes and edges
         """
-        if not self.use_treesitter:
-            # Fallback to legacy parser
-            logger.warning("Using legacy parser")
-            return self.legacy_parser.parse(code, filename)
-        
         try:
             # Parse with UniversalParser
             std_tree = self.parser.parse_code(code, self.lang_type, filename)
@@ -304,20 +294,14 @@ class UniversalASTParser:
             
         except Exception as e:
             logger.error(f"Error parsing {filename}: {e}")
-            
-            # Try fallback
-            if hasattr(self, 'legacy_parser'):
-                logger.warning("Attempting fallback to legacy parser")
-                return self.legacy_parser.parse(code, filename)
-            
-            # Return empty graph
+            # Return empty graph on error
             return SemanticGraph(nodes=[], edges=[])
 
 
-# Convenience function for backward compatibility
+# Convenience function
 def parse_code(code: str, language: str, filename: str = "unknown") -> SemanticGraph:
     """
-    Quick parse function that maintains backward compatibility.
+    Quick parse function for one-off parsing.
     
     Args:
         code: Source code string
