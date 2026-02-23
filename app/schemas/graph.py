@@ -40,7 +40,9 @@ class GraphNode(BaseModel):
     
     # Parent/child relationships (for AST traversal)
     parent_id: Optional[str] = None
+    # very imp to define list[str] as default_factory to avoid mutable default argument issues
     child_ids: list[str] = Field(default_factory=list)
+
 
 
 class GraphEdge(BaseModel):
