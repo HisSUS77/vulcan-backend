@@ -19,3 +19,4 @@ anthropic>=0.21  # Optional: For Claude classification
 groq>=0.4  # Optional: For Groq classification
 reportlab>=4.0  # For PDF report generation
 tree-sitter>=0.21.0  # Tree-sitter for production-grade multi-language parsing
+tree-sitter-languages>=1.10.2  # Pre-built language grammars for tree-sitter
