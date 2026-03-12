@@ -17,7 +17,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 import re
 
-from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph
+from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph , NodeType
 from app.enums.edge_type import EdgeType
 from app.domain.analysis.html_parser import HTMLParser, HTMLEdgeType, HTMLNodeType
 
