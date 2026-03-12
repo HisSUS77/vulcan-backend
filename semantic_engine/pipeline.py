@@ -16,6 +16,7 @@ from app.domain.analysis.semantic_graph_builder import SemanticGraphBuilder
 from semantic_engine.query_store.loader import get_query_store, QueryRule
 from semantic_engine.query_executor.executor import QueryExecutor, CodeSlice
 from semantic_engine.classifier.classifier import get_classifier, ClassifiedVulnerability
+from app.core.trace import trace_step
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ class SemanticPipeline:
         code: str,
         language: str = "python"
     ) -> AnalysisResult:
+        trace_step("Pipeline: analyze_code() (semantic_engine/pipeline.py)")
         """
         Analyze code for security vulnerabilities.
         
@@ -128,6 +130,7 @@ class SemanticPipeline:
         
         try:
             # Step 1: Build semantic graph
+            trace_step("Pipeline step: _build_graph()")
             graph = await self._build_graph(code, language)
             
             if graph is None:
@@ -151,11 +154,13 @@ class SemanticPipeline:
             # Step 2: Broad path discovery (primary)
             all_slices = []
             if self.config.enable_path_discovery:
+                trace_step("Pipeline step: _discover_paths()")
                 discovery_slices = await self._discover_paths(graph, {filename: code})
                 all_slices.extend(discovery_slices)
                 logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
 
             # Step 3: Execute security queries (augment discovery results)
+            trace_step("Pipeline step: _execute_queries()")
             query_slices = await self._execute_queries(graph, code)
             if discovery_slices:
                 discovery_slices = self._filter_discovery_slices(discovery_slices, query_slices)
@@ -163,6 +168,7 @@ class SemanticPipeline:
             logger.info(f"Query execution: {len(query_slices)} slices found")
             
             # Step 4: Classify with LLM
+            trace_step("Pipeline step: _classify_slices()")
             vulnerabilities = await self._classify_slices(all_slices)
             vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
             logger.info(f"Classification: {len(vulnerabilities)} vulnerabilities confirmed")
@@ -285,6 +291,7 @@ class SemanticPipeline:
         repo_path: str,
         file_paths: Optional[list[str]] = None
     ) -> AnalysisResult:
+        trace_step("Pipeline: analyze_repository() (semantic_engine/pipeline.py)")
         """
         Analyze a repository with multi-file, interprocedural path discovery.
         """
@@ -293,6 +300,7 @@ class SemanticPipeline:
         errors = []
         try:
             from app.domain.analysis.multi_file_repo_graph import MultiFileRepositoryGraph
+            trace_step("Repo graph: MultiFileRepositoryGraph.build()")
             repo_graph = MultiFileRepositoryGraph(repo_path)
             result = repo_graph.build()
             graph = result["global_cpg"]
@@ -325,17 +333,20 @@ class SemanticPipeline:
             # Broad path discovery
             all_slices = []
             if self.config.enable_path_discovery:
+                trace_step("Pipeline step: _discover_paths() [repo]")
                 discovery_slices = await self._discover_paths(graph, source_code_map)
                 logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
 
             # Always augment with rule-based queries (use concatenated source if needed)
             concat_source = "\n".join(source_code_map.values()) if source_code_map else ""
+            trace_step("Pipeline step: _execute_queries() [repo]")
             query_slices = await self._execute_queries(graph, concat_source, source_code_map)
             if discovery_slices:
                 discovery_slices = self._filter_discovery_slices(discovery_slices, query_slices)
             all_slices = (discovery_slices or []) + query_slices
             logger.info(f"Query execution: {len(query_slices)} slices found")
 
+            trace_step("Pipeline step: _classify_slices() [repo]")
             vulnerabilities = await self._classify_slices(all_slices)
             vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
             analysis_time = time.time() - start_time

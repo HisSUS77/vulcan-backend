@@ -20,6 +20,7 @@ from app.schemas.scan import ScanStatusRead, ScanSummary
 from app.db.mongo import to_object_id
 from app.core.config import settings
 from app.patch_module.patch_repository import PatchRepository
+from app.core.trace import trace_step
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class ScanService:
         repo_token: Optional[str] = None,
         file_paths: Optional[list[str]] = None,
     ) -> tuple[str, str]:
+        trace_step("Service: ScanService.start() (app/services/scan_service.py)")
         scan_id = f"scan-{uuid.uuid4().hex[:12]}"
         input_type = "DIRECT_CODE" if code else "REPOSITORY"
 
@@ -77,10 +79,12 @@ class ScanService:
         await self.db.scans.insert_one(scan_doc)
 
         if code:
+            trace_step("Dispatch: create_task(_run_direct_code_scan)")
             asyncio.create_task(
                 self._run_direct_code_scan(scan_id, code, language, filename, scan_mode)
             )
         else:
+            trace_step("Dispatch: create_task(_run_repository_scan)")
             asyncio.create_task(
                 self._run_repository_scan(
                     scan_id,
@@ -296,6 +300,7 @@ class ScanService:
         filename: Optional[str],
         scan_mode: str,
     ):
+        trace_step("Worker: _run_direct_code_scan() (app/services/scan_service.py)")
         start_time = time.time()
         try:
             await self._update_scan(
@@ -336,6 +341,7 @@ class ScanService:
             try:
                 await self._append_logs(scan_id, ["[INFO] Building semantic graph..."])
                 pipeline = get_pipeline(PipelineConfig(enable_llm=True))
+                trace_step("SemanticPipeline: analyze_code()")
                 result = await pipeline.analyze_code(
                     filename=filename,
                     code=code,
@@ -408,6 +414,7 @@ class ScanService:
         repo_token: Optional[str],
         file_paths: Optional[list[str]],
     ):
+        trace_step("Worker: _run_repository_scan() (app/services/scan_service.py)")
         start_time = time.time()
         temp_root = None
         try:
@@ -422,6 +429,7 @@ class ScanService:
             temp_root = Path(tempfile.mkdtemp(prefix="vulcan-repo-"))
             repo_root = temp_root / "repo"
             if repo_provider == "LOCAL":
+                trace_step("Repo source: LOCAL archive extract")
                 upload_dir = Path(settings.REPO_STORAGE_DIR) / str(repo_id)
                 if not upload_dir.exists():
                     raise ValueError("No uploaded archive found for this repository")
@@ -432,11 +440,13 @@ class ScanService:
                 await self._append_logs(scan_id, [f"[INFO] Extracting archive: {archive_path.name}"])
                 self._extract_archive(archive_path, repo_root)
             elif repo_url:
+                trace_step("Repo source: git clone")
                 await self._append_logs(scan_id, [f"[INFO] Cloning repository: {repo_url}"])
                 self._clone_repo(repo_url, branch, repo_token, repo_root)
             else:
                 raise ValueError("Repository URL is missing")
 
+            trace_step("Collecting source files for scan")
             files = self._collect_source_files(repo_root)
             if file_paths:
                 allowed = {
@@ -483,6 +493,7 @@ class ScanService:
 
             # Repository-level analysis (multi-file, interprocedural)
             pipeline = get_pipeline(PipelineConfig(enable_llm=True))
+            trace_step("SemanticPipeline: analyze_repository()")
             repo_result = await pipeline.analyze_repository(
                 repo_path=str(repo_root),
                 file_paths=[str(p.relative_to(repo_root)).replace("\\", "/") for p in files],

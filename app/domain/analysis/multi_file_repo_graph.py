@@ -36,6 +36,7 @@ from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph, NodeMetadata
 from app.enums.edge_type import EdgeType
 from app.enums.node_type import NodeType
 from app.domain.analysis.cpg_parser import CPGParser
+from app.core.trace import trace_step
 from app.domain.analysis.html_parser import HTMLParser
 from app.domain.analysis.html_backend_linker import HTMLBackendLinker
 from app.domain.analysis.interprocedural_dfg import InterproceduralDFG, DFGEdgeType
@@ -1410,6 +1411,7 @@ class MultiFileRepositoryGraph:
         self.all_edges: List[GraphEdge] = []
     
     def build(self) -> Dict[str, Any]:
+        trace_step("Repo graph: MultiFileRepositoryGraph.build() (app/domain/analysis/multi_file_repo_graph.py)")
         """
         Build multi-file repository graph
         
@@ -1423,12 +1425,14 @@ class MultiFileRepositoryGraph:
         print(f"Scanning repository: {self.repo_path}")
         
         # Step 1: Scan repository
+        trace_step("Repo graph step: scanner.scan() (RepositoryScanner)")
         source_files = self.scanner.scan()
         code_files = [p for p in source_files if not self._is_html_file(p)]
         html_files = [p for p in source_files if self._is_html_file(p)]
         print(f"  Found {len(source_files)} source files")
         
         # Step 2: Parse each file
+        trace_step("Repo graph step: parse files (ThreadPoolExecutor -> _parse_file)")
         print("\nParsing files...")
         max_workers = min(8, os.cpu_count() or 4)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1451,6 +1455,7 @@ class MultiFileRepositoryGraph:
         self.symbol_table.expand_reexports()
         
         # Step 3: Link imports to exports
+        trace_step("Repo graph step: CrossFileLinker.link_*()")
         print("\nLinking cross-file references...")
         linker = CrossFileLinker(self.symbol_table)
         linker.link_imports_to_exports()
@@ -1524,6 +1529,7 @@ class MultiFileRepositoryGraph:
         }
     
     def _parse_file(self, file_path: Path):
+        trace_step(f"Repo graph: _parse_file({file_path}) (app/domain/analysis/multi_file_repo_graph.py)")
         """Parse a single file and add to global symbol table"""
         # Determine language
         language = self._detect_language(file_path)

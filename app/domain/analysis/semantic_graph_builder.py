@@ -16,6 +16,7 @@ from app.domain.analysis.interprocedural_dfg import InterproceduralDFG
 from app.domain.analysis.taint_engine import TaintEngine
 from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
+from app.core.trace import trace_step
 
 
 class SemanticGraphBuilder:
@@ -35,6 +36,7 @@ class SemanticGraphBuilder:
         self.taint_engine = TaintEngine()
     
     def build(self, code: str, filename: str = "source.py") -> SemanticGraph:
+        trace_step("Graph builder: SemanticGraphBuilder.build() (app/domain/analysis/semantic_graph_builder.py)")
         """
         Build complete semantic graph from source code.
         
@@ -57,9 +59,11 @@ class SemanticGraphBuilder:
                 f"Missing tree-sitter grammar for '{self.language}'. "
                 "Run: python setup_grammars.py"
             )
+        trace_step("CPG: CPGParser.parse_code()")
         cpg = self.cpg_parser.parse_code(code, self.language, filename)
         
         # Step 2: Build interprocedural DFG
+        trace_step("DFG: InterproceduralDFG.build()")
         dfg_builder = InterproceduralDFG(cpg)
         enhanced_cpg = dfg_builder.build()
         

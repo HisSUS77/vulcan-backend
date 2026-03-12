@@ -30,6 +30,7 @@ except ImportError:
 from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph, NodeMetadata
 from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
+from app.core.trace import trace_step
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,7 @@ class CPGParser:
     
     def __init__(self, grammar_path: Optional[Path] = None):
         """Initialize CPG parser with Tree-sitter grammars"""
+        trace_step("CPG: CPGParser.__init__() (app/domain/analysis/cpg_parser.py)")
         if not TREE_SITTER_AVAILABLE:
             raise RuntimeError("tree-sitter is required. Install: pip install tree-sitter==0.21.3")
         
@@ -193,6 +195,7 @@ class CPGParser:
         Returns:
             SemanticGraph with full CPG representation
         """
+        trace_step(f"CPG: parse_file(filepath={filepath}) (app/domain/analysis/cpg_parser.py)")
         # Detect language
         ext = Path(filepath).suffix.lower()
         if language is None:
@@ -236,6 +239,7 @@ class CPGParser:
             - Symbol references
             - Parent/child relationships
         """
+        trace_step(f"CPG: parse_code(language={language}, filename={filename}) (app/domain/analysis/cpg_parser.py)")
         lang = self._normalize_language(language)
         if lang is None:
             logger.error(f"Unsupported language: {language}")

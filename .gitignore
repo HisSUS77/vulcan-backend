@@ -6,10 +6,15 @@ __pycache__/
 *.pyc
 *.cpython-313.pyc
 *venv
+.pytest_cache/
+tests/.tmp/
 
 # Local database
 vulcan.db
 .vulcan_cache/
+tests/.tmp/
+tests/.tmp_work/
+.pytest_cache/
 
 # OS generated files
 .DS_Store
