@@ -1,17 +1,14 @@
 import unittest
-import tempfile
-from pathlib import Path
 
 from app.domain.analysis.multi_file_repo_graph import MultiFileRepositoryGraph
-from _utils import has_grammar
+from _utils import has_grammar, temporary_repo_dir
 
 
 class TestTSExportEquals(unittest.TestCase):
     def test_ts_export_equals_import_equals(self):
         if not has_grammar("typescript"):
             self.skipTest("Tree-sitter TypeScript grammar not available")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            repo = Path(tmpdir)
+        with temporary_repo_dir() as repo:
             (repo / "a.ts").write_text("const value = 1;\\nexport = value;", encoding="utf-8")
             (repo / "b.ts").write_text("import x = require('./a');\\nconsole.log(x);", encoding="utf-8")
             graph = MultiFileRepositoryGraph(str(repo)).build()

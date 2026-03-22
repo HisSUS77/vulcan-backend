@@ -16,6 +16,7 @@ python-multipart
 
 # Tree-sitter for CPG Parser (specific version for compatibility)
 tree-sitter==0.21.3
+tree-sitter-languages>=1.10.2
 setuptools
 
 # Development

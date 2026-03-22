@@ -11,6 +11,7 @@ from app.services.repository_service import RepositoryService
 from app.core.permissions import can_access_resource
 from app.core.exceptions import AuthorizationException, ResourceNotFoundException
 from datetime import datetime
+from app.core.trace import trace_step
 
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -23,6 +24,7 @@ async def start_scan(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
     session: AsyncSession = Depends(get_db),
 ):
+    trace_step("API endpoint: POST /scans/start (app/api/routes/scans.py)")
     """
     Start a vulnerability scan with dual input modes.
     
@@ -46,11 +48,14 @@ async def start_scan(
         repo_provider = None
         repo_token = None
         if payload.repo_id:
+            trace_step("Scan input mode: REPOSITORY (repo_id provided)")
             repo_service = RepositoryService()
             repo = await repo_service.get(session, payload.repo_id)
             repo_url = repo.url
             repo_provider = repo.provider
             repo_token = repo.access_token
+        else:
+            trace_step("Scan input mode: DIRECT_CODE (no repo_id)")
 
         scan_id, input_type = await service.start(
             user_id=user["id"],
@@ -87,6 +92,7 @@ async def scan_status(
     user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
+    trace_step("API endpoint: GET /scans/{scan_id}/status (app/api/routes/scans.py)")
     """
     Get current scan status with progress information.
     
@@ -129,6 +135,7 @@ async def scan_logs(
     user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
+    trace_step("API endpoint: GET /scans/{scan_id}/logs (app/api/routes/scans.py)")
     """
     Get real-time scan logs.
     Returns last 100 log entries.
@@ -157,6 +164,7 @@ async def scan_summary(
     user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
+    trace_step("API endpoint: GET /scans/{scan_id}/summary (app/api/routes/scans.py)")
     """
     Get final scan summary with vulnerability results.
     
@@ -199,6 +207,7 @@ async def cancel_scan(
     user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
+    trace_step("API endpoint: POST /scans/{scan_id}/cancel (app/api/routes/scans.py)")
     """
     Cancel a running scan.
     

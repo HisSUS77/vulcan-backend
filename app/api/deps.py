@@ -7,6 +7,7 @@ from app.core.security import decode_token
 from app.db.mongo import get_mongo_db, to_object_id
 from app.db.session import get_session
 from app.enums.role import UserRole
+from app.core.trace import trace_step
 
 
 auth_scheme = HTTPBearer(auto_error=False)
@@ -20,6 +21,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(auth_scheme),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ) -> dict:
+    trace_step("Auth dependency: get_current_user() (app/api/deps.py)")
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     token = credentials.credentials

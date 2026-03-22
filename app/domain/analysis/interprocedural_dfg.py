@@ -21,6 +21,7 @@ from enum import Enum
 from app.schemas.graph import GraphNode, GraphEdge, SemanticGraph
 from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
+from app.core.trace import trace_step
 from pydantic import BaseModel, Field
 
 
@@ -164,6 +165,7 @@ class InterproceduralDFG:
         self.return_types = {NodeType.RETURN}
         
     def build(self) -> SemanticGraph:
+        trace_step("DFG: InterproceduralDFG.build() (app/domain/analysis/interprocedural_dfg.py)")
         """
         Build interprocedural DFG
         
