@@ -82,10 +82,10 @@ class QueryExecutor:
         """
         logger.debug(f"Executing query: {query.rule_id}")
         
-        # Regex/setting-based rules (no source/sink required)
+        # Regex/setting-based rules (no source/sink required).
         regex_slices = self._execute_regex_patterns(query, source_code, source_code_map)
 
-        # Step 1: Resolve source nodes
+        # Step 1: Resolve source nodes from query patterns.
         source_nodes = self._resolve_sources(graph, query)
         if not source_nodes:
             if regex_slices:
@@ -93,7 +93,7 @@ class QueryExecutor:
             logger.debug(f"No source nodes found for {query.rule_id}")
             return []
         
-        # Step 2: Resolve sink nodes
+        # Step 2: Resolve sink nodes from query patterns.
         sink_nodes = self._resolve_sinks(graph, query)
         if not sink_nodes:
             if regex_slices:
@@ -103,7 +103,7 @@ class QueryExecutor:
         
         logger.debug(f"Found {len(source_nodes)} sources, {len(sink_nodes)} sinks")
         
-        # Step 3: Find paths based on pattern type
+        # Step 3: For each pattern type, find paths source -> sink.
         slices = []
         for pattern in query.patterns:
             # Guard-aware patterns (e.g., "DFG_FLOW AND NOT exists(auth_check)")
@@ -122,7 +122,7 @@ class QueryExecutor:
                 if slice_obj:
                     slices.append(slice_obj)
         
-        # Step 5: Deduplicate and rank
+        # Step 5: Deduplicate and rank slices (prefer stronger evidence).
         slices = self._deduplicate_slices(slices + regex_slices)
         
         logger.info(f"Query {query.rule_id}: found {len(slices)} potential issues")
@@ -135,6 +135,7 @@ class QueryExecutor:
         source_code_map: Optional[Dict[str, str]]
     ) -> List[CodeSlice]:
         """Execute regex/dangerous-setting based rules."""
+        # Combine all regex-like patterns into a single list to scan raw code.
         patterns = list(query.regex_patterns or [])
         patterns += list(query.dangerous_settings or [])
         patterns += list(query.dangerous_values or [])
@@ -153,6 +154,7 @@ class QueryExecutor:
         if not patterns:
             return []
 
+        # Default to a single "input" file unless a file map is provided.
         files = {"input": source_code}
         if source_code_map:
             files = source_code_map
@@ -206,6 +208,7 @@ class QueryExecutor:
 
     def _has_required_guards(self, graph: SemanticGraph, guards: List[str]) -> bool:
         """Return True if guard patterns are found in the graph."""
+        # Used for rules that should be skipped when auth guards exist.
         guard_set = {g.lower() for g in guards}
         for node in graph.nodes:
             label = (node.name or node.id or "").lower()
@@ -277,12 +280,12 @@ class QueryExecutor:
         Returns:
             True if node matches pattern
         """
-        # Get node label (use name or fallback to id)
+        # Get node label (use name or fallback to id).
         node_label = node.name or node.id
         label_lower = node_label.lower()
         pattern_lower = pattern.lower()
         
-        # Special pattern: PARAMETER matches any function parameter
+        # Special pattern: PARAMETER matches any function parameter.
         if pattern == 'PARAMETER' and node.type == NodeType.PARAMETER:
             name = (node.name or "").lower()
             if node.metadata and getattr(node.metadata, "security_role", None) == "source":
@@ -293,28 +296,27 @@ class QueryExecutor:
             }
             return name in common
         
-        # Check node label
-        # Token-aware match to avoid false positives (e.g., exec vs execute)
+        # Token-aware match to avoid false positives (e.g., exec vs execute).
         if self._label_matches_pattern(label_lower, pattern_lower):
             return True
         
-        # Check node type for common patterns
+        # Check node type for common patterns.
         if pattern in ['input', 'user_input'] and node.type == NodeType.PARAMETER:
             return True
         
-        # Subscripts like sys.argv are common sources
+        # Subscripts like sys.argv are common sources.
         if node.type == NodeType.SUBSCRIPT and pattern_lower in label_lower:
             return True
         
         if pattern in ['execute', 'query'] and node.type == NodeType.CALL_EXPRESSION:
             return self._label_matches_pattern(label_lower, pattern_lower)
         
-        # Check value field if available
+        # Check value field if available.
         if hasattr(node, 'value') and node.value:
             if pattern_lower in str(node.value).lower():
                 return True
         
-        # Check metadata if available
+        # Check metadata if available.
         if hasattr(node, 'metadata') and node.metadata:
             metadata_str = str(node.metadata).lower()
             if pattern_lower in metadata_str:
@@ -346,6 +348,7 @@ class QueryExecutor:
         return False
 
     def _language_allows_node(self, node: GraphNode, query: QueryRule) -> bool:
+        # Filter nodes by rule language list using file extensions.
         languages = getattr(query, "languages", None)
         if not languages:
             return True
@@ -370,15 +373,15 @@ class QueryExecutor:
         if not pattern_lower:
             return False
 
-        # Exact substring match for fully-qualified patterns
+        # Exact substring match for fully-qualified patterns.
         if any(ch in pattern_lower for ch in [".", "(", ")", "'", "\""]):
             return pattern_lower in label_lower
 
-        # Strip leading dots like ".get"
+        # Strip leading dots like ".get".
         if pattern_lower.startswith("."):
             pattern_lower = pattern_lower[1:]
 
-        # Tokenize on non-alphanumerics and dots
+        # Tokenize on non-alphanumerics to avoid partial matches.
         tokens = []
         current = []
         for ch in label_lower:
@@ -414,14 +417,14 @@ class QueryExecutor:
         Returns:
             List of paths (each path is list of node IDs)
         """
-        # Build adjacency list for specified edge type
+        # Build adjacency list for specified edge types.
         edge_types = self._get_edge_types_for_pattern(pattern_type)
         adj_list = self._build_adjacency_list(graph, edge_types)
         
-        # Build sanitizer set
+        # Sanitizers are checked later to reduce confidence.
         sanitizers = set(query.sanitizers)
         
-        # Find paths using BFS
+        # Find paths using BFS.
         all_paths = []
         source_ids = {s.id for s in sources}
         sink_ids = {s.id for s in sinks}
@@ -515,21 +518,21 @@ class QueryExecutor:
         while queue and len(paths) < self.max_paths_per_rule:
             current, path = queue.popleft()
             
-            # Check if we reached a target
+        # Check if we reached a target.
             if current in targets:
                 paths.append(path)
                 continue
             
-            # Check path length limit
+            # Check path length limit.
             if len(path) >= self.max_path_length:
                 continue
             
-            # Explore neighbors
+            # Explore neighbors.
             for neighbor in adj_list.get(current, []):
                 if neighbor in path:  # Avoid cycles
                     continue
                 
-                # Do not skip sanitizers; handle in slice confidence
+                # Do not skip sanitizers; handle in slice confidence.
                 
                 new_path = path + [neighbor]
                 path_key = tuple(new_path)
@@ -590,7 +593,7 @@ class QueryExecutor:
         if not source_node or not sink_node:
             return None
         
-        # Extract line numbers from path
+        # Extract line numbers from path nodes.
         line_numbers = set()
         for node_id in path:
             node = node_map.get(node_id)
@@ -604,11 +607,11 @@ class QueryExecutor:
             if hasattr(sink_node, 'line') and sink_node.line:
                 line_numbers.add(sink_node.line)
         
-        # Determine file for snippet extraction
+        # Determine file and resolve source for snippet extraction.
         file_path = (source_node.file or sink_node.file or "input")
         file_source = self._resolve_file_source(file_path, source_code, source_code_map)
 
-        # Extract code snippet with context (+/-3 lines)
+        # Extract code snippet with context (+/-3 lines).
         snippet = self._extract_code_snippet(file_source, line_numbers, context=3)
         if not snippet and (source_node.source_code or sink_node.source_code):
             # Fallback: use node source_code if we couldn't map lines to file
@@ -619,7 +622,7 @@ class QueryExecutor:
                 parts.append(f"SINK: {sink_node.source_code}")
             snippet = "\n".join(parts).strip()
         
-        # Determine location
+        # Determine location from line numbers.
         min_line = min(line_numbers) if line_numbers else 1
         max_line = max(line_numbers) if line_numbers else 1
         
@@ -629,15 +632,16 @@ class QueryExecutor:
             "end_line": max_line
         }
         
-        # Generate reason
+        # Generate reason string, include sanitizer evidence.
         sanitizer_hits = self._count_sanitizers_in_path(path, graph, set(query.sanitizers))
         reason = self._generate_reason(source_node, sink_node, query, pattern_type)
         if sanitizer_hits:
             reason += f" Sanitizers observed: {sanitizer_hits}."
         
-        # Create slice
+        # Create slice payload.
         slice_id = f"{query.rule_id}_{source_node.id}_{sink_node.id}"
         
+        # Lower confidence/severity when sanitizers are on the path.
         confidence = query.confidence
         severity = query.severity
         if sanitizer_hits:
@@ -720,22 +724,22 @@ class QueryExecutor:
         Resolve file source from source_code_map or disk, with robust path matching.
         """
         if source_code_map:
-            # Exact match
+            # Exact match.
             if file_path in source_code_map:
                 return source_code_map[file_path]
 
-            # Normalized slash match
+            # Normalized slash match.
             norm_path = file_path.replace("\\", "/")
             if norm_path in source_code_map:
                 return source_code_map[norm_path]
 
-            # Suffix match (handle relative vs absolute)
+            # Suffix match (handle relative vs absolute).
             for key, code in source_code_map.items():
                 key_norm = key.replace("\\", "/")
                 if key_norm.endswith(norm_path):
                     return code
 
-        # Disk fallback if file exists
+        # Disk fallback if file exists.
         try:
             if file_path and os.path.exists(file_path):
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -800,7 +804,7 @@ class QueryExecutor:
 
         unique_slices = list(best_by_key.values())
 
-        # Sort by severity (most severe first), then confidence
+        # Sort by severity (most severe first), then confidence.
         severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
         unique_slices.sort(
             key=lambda s: (

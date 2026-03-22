@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 class PatchOrchestrator:
     def __init__(self, db: AsyncIOMotorDatabase):
+        # DB + helpers used across generate/validate/apply flows.
         self.db = db
         self.repo = PatchRepository(db)
         self.llm = PatchLLMService()
@@ -36,14 +37,17 @@ class PatchOrchestrator:
         vulnerability_id: Optional[str],
         context: Optional[VulnerabilityContext],
     ) -> PatchGenerateResponse:
+        # Load vulnerability context (from request or DB by vulnerability_id).
         ctx = context or await self._load_context(user_id, vulnerability_id)
         if ctx is None:
             raise ResourceNotFoundException("Vulnerability context not found")
 
+        # Guardrails: rate limit, max slice size, reject secrets in prompt.
         await enforce_rate_limit(self.db, user_id)
         enforce_slice_length(ctx.vulnerable_slice)
         reject_secrets(ctx.vulnerable_slice)
 
+        # Build a strict prompt and ask LLM for a unified diff patch.
         prompt = PromptBuilder.build_prompt(
             language=ctx.language,
             vuln_type=ctx.vuln_type,
@@ -57,12 +61,15 @@ class PatchOrchestrator:
         )
 
         unified_diff = await self.llm.generate_patch(prompt)
+        # Run validations (diff format + syntax + semantic checks).
         validations = self._run_validations(ctx, unified_diff)
         status = "generated" if all(v.passed for v in validations) else "rejected"
 
+        # Compute confidence and a short explanation from validations.
         confidence = self._compute_confidence(unified_diff, validations)
         explanation = self._build_explanation(validations)
 
+        # Persist patch record in DB.
         patch_id = await self.repo.create_patch({
             "patch_id": None,
             "vulnerability_id": ctx.vulnerability_id,
@@ -86,6 +93,7 @@ class PatchOrchestrator:
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
         })
+        # Sync patch status into the scan summary for UI consumption.
         await self._sync_patch_to_scan(ctx.vulnerability_id, patch_id, status, confidence, validations)
 
         return PatchGenerateResponse(
@@ -98,6 +106,7 @@ class PatchOrchestrator:
         )
 
     async def validate(self, patch_id: str) -> PatchValidateResponse:
+        # Re-run validators on an existing patch and update its status.
         patch = await self.repo.get_patch(patch_id)
         if not patch:
             raise ResourceNotFoundException("Patch not found")
@@ -118,20 +127,24 @@ class PatchOrchestrator:
         unified_diff = patch.get("unified_diff", "")
         validations = self._run_validations(ctx, unified_diff)
         status = "validated" if all(v.passed for v in validations) else "rejected"
+        # Persist updated validation results.
         await self.repo.update_patch(patch_id, {
             "validations": [v.model_dump() for v in validations],
             "status": status,
         })
+        # Sync summary in scans collection for UI.
         await self._sync_patch_to_scan(ctx.vulnerability_id, patch_id, status, patch.get("confidence"), validations)
         return PatchValidateResponse(patch_id=patch_id, validations=validations, status=status)
 
     async def apply(self, patch_id: str, user_id: str, repo_id: Optional[str]) -> PatchApplyResponse:
+        # Create a "pending apply" record; actual repo changes are external.
         patch = await self.repo.get_patch(patch_id)
         if not patch:
             raise ResourceNotFoundException("Patch not found")
 
         pending_apply_id = await self.repo.create_pending_apply(patch_id, user_id, repo_id)
         branch = f"vulcan/patch-{patch_id[:8]}"
+        # Mark patch as pending apply and sync to scan.
         await self.repo.update_patch(patch_id, {"status": "applied_pending"})
         patch_validations = patch.get("validations") or []
         validation_objs = [ValidationResult(**v) if isinstance(v, dict) else v for v in patch_validations]
@@ -152,15 +165,18 @@ class PatchOrchestrator:
         )
 
     async def export(self, patch_id: str) -> str:
+        # Return the unified diff for download/export.
         patch = await self.repo.get_patch(patch_id)
         if not patch:
             raise ResourceNotFoundException("Patch not found")
         return patch.get("unified_diff", "")
 
     def _run_validations(self, ctx: VulnerabilityContext, unified_diff: str) -> List[ValidationResult]:
+        # Wrapper to keep validation logic in PatchValidator.
         return self.validator.validate(ctx, unified_diff)
 
     def _compute_confidence(self, unified_diff: str, validations: List[ValidationResult]) -> float:
+        # Base confidence is adjusted down per failed validator.
         base = 0.8
         if "PLACEHOLDER_FILE" in unified_diff:
             base = 0.5
@@ -169,11 +185,13 @@ class PatchOrchestrator:
         return round(confidence, 2)
 
     def _build_explanation(self, validations: List[ValidationResult]) -> str:
+        # Human-readable summary for UI.
         passed = [v.name for v in validations if v.passed]
         failed = [v.name for v in validations if not v.passed]
         return f"Automated patch generation. Passed: {passed}. Failed: {failed}."
 
     async def _load_context(self, user_id: str, vulnerability_id: Optional[str]) -> Optional[VulnerabilityContext]:
+        # Load vulnerability context from scan summary by vulnerability_id.
         if not vulnerability_id:
             return None
         scan = await self.db.scans.find_one({"summary.vulnerabilities.id": vulnerability_id})
@@ -208,6 +226,7 @@ class PatchOrchestrator:
         confidence: Optional[float],
         validations: List[ValidationResult],
     ) -> None:
+        # Write patch status into both summary and top-level vulnerabilities arrays.
         if not vulnerability_id:
             return
         passed = sum(1 for v in validations if v.passed)

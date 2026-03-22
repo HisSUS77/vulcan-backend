@@ -40,6 +40,8 @@ class PathDiscovery:
         source_code_map: Dict[str, str],
         query_store: QueryStore
     ) -> List[CodeSlice]:
+        # High-level flow: collect candidate sources/sinks, traverse paths,
+        # score them, then emit CodeSlice objects for downstream analysis.
         node_map = {n.id: n for n in graph.nodes}
         sources, sinks, sanitizers = self._collect_patterns(graph, query_store)
         if not sources or not sinks:
@@ -92,6 +94,7 @@ class PathDiscovery:
         graph: SemanticGraph,
         query_store: QueryStore
     ) -> Tuple[List[GraphNode], List[GraphNode], Set[str]]:
+        # Sources/sinks come from both query patterns and graph metadata roles.
         sources: List[GraphNode] = []
         sinks: List[GraphNode] = []
         sanitizers: Set[str] = set()
@@ -120,6 +123,7 @@ class PathDiscovery:
         return sources, sinks, sanitizers
 
     def _label_matches_pattern(self, label_lower: str, pattern_lower: str) -> bool:
+        # Tokenize labels to avoid accidental substring matches (e.g., "getuser").
         if not pattern_lower:
             return False
         if any(ch in pattern_lower for ch in [".", "(", ")", "'", "\""]):
@@ -142,6 +146,7 @@ class PathDiscovery:
         return pattern_lower in tokens
 
     def _build_adjacency(self, graph: SemanticGraph) -> Tuple[Dict[str, List[str]], Dict[Tuple[str, str], List[EdgeType]]]:
+        # Only traverse edges that plausibly carry data/taint.
         edge_types = {
             EdgeType.DFG_FLOW,
             EdgeType.DFG_PARAM_PASS,
@@ -169,6 +174,7 @@ class PathDiscovery:
         adj: Dict[str, List[str]],
         node_map: Dict[str, GraphNode]
     ) -> List[List[str]]:
+        # BFS with depth and candidate limits to avoid explosion.
         paths: List[List[str]] = []
         queue: List[List[str]] = [[source_id]]
         visited_paths = set()
@@ -216,6 +222,8 @@ class PathDiscovery:
         sink: GraphNode,
         sanitizers: Set[str]
     ) -> Tuple[float, str]:
+        # Heuristic scoring combines path length, boundary crossings, sanitizer hits,
+        # and auth coverage indicators to prioritize likely true flows.
         path_len = max(1, len(path))
         iis = 1.0 / (1.0 + path_len)
         boundary_crossings = self._boundary_crossings(node_map, path)
@@ -324,6 +332,7 @@ class PathDiscovery:
         path: List[str],
         source_code_map: Dict[str, str]
     ) -> Tuple[str, Dict[str, int]]:
+        # Build a human-readable snippet with path nodes/edges and line context.
         path_edge_types: List[str] = []
         for i in range(len(path) - 1):
             types = edge_map.get((path[i], path[i + 1]), [])
