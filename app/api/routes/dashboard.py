@@ -113,6 +113,62 @@ async def recent_scans(
     return items
 
 
+@router.get("/patch-stats")
+async def patch_stats(
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """
+    Live patch success rate and breakdown by status.
+    Used by the dashboard AI Patch Success Rate card.
+    """
+    patch_query = {}
+    if user.get("role") != UserRole.ADMIN.value:
+        patch_query["user_id"] = user.get("id")
+
+    patch_repo = PatchRepository(db)
+    patches = await patch_repo.patches.find(patch_query).to_list(length=2000)
+
+    total = len(patches)
+
+    # Count each status bucket
+    counts = {"applied": 0, "applied_pending": 0, "approved": 0, "validated": 0,
+               "generated": 0, "failed": 0, "other": 0}
+    confidences = []
+    for p in patches:
+        s = (p.get("status") or "other").lower()
+        if s in counts:
+            counts[s] += 1
+        else:
+            counts["other"] += 1
+        c = p.get("confidence")
+        if isinstance(c, (int, float)):
+            confidences.append(c)
+
+    # Success = validated + approved + applied_pending + applied
+    successful = counts["validated"] + counts["approved"] + counts["applied_pending"] + counts["applied"]
+    actually_applied = counts["applied"] + counts["applied_pending"]
+    success_rate = round(successful / total, 4) if total else 0.0
+    avg_confidence = round(sum(confidences) / len(confidences), 4) if confidences else 0.0
+
+    return {
+        "total_patches": total,
+        "successful": successful,
+        "applied": actually_applied,
+        "success_rate": success_rate,
+        "avg_confidence": avg_confidence,
+        "breakdown": {
+            "applied": counts["applied"],
+            "applied_pending": counts["applied_pending"],
+            "approved": counts["approved"],
+            "validated": counts["validated"],
+            "generated": counts["generated"],
+            "failed": counts["failed"],
+            "other": counts["other"],
+        },
+    }
+
+
 @router.get("/notifications")
 async def notifications(
     page: int = 1,
