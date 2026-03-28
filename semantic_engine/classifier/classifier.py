@@ -117,8 +117,41 @@ class SliceClassifier:
         Returns:
             ClassifiedVulnerability or None if filtered out
         """
-        # Get LLM classification
-        if self.enable_llm and self.llm_service:
+        # "Presence" vulnerabilities: dangerous by definition regardless of
+        # whether user input is visible in the snippet.  The LLM cannot make
+        # these "safe" — it only rejects them because regex matches give
+        # source="regex" / sink="regex" with no taint context.
+        # Do NOT include taint-flow rules here (SQL, SSRF, path traversal, etc.)
+        # — those still benefit from LLM false-positive filtering.
+        _PRESENCE_VULN_RULES = {
+            # Insecure APIs — dangerous regardless of inputs
+            "INSECURE_DESERIALIZATION",   # pickle.loads is always unsafe
+            "WEAK_CRYPTO",                # md5/sha1 always cryptographically weak
+            "USE_OF_HARD_CODED_IV",       # hardcoded IV always wrong
+            # Configuration issues — presence = vulnerability
+            "DEBUG_MODE_ENABLED",
+            "DISABLED_CERTIFICATE_VALIDATION",  # verify=False always wrong
+            "JWT_NONE_ALGORITHM",               # algorithms=["none"] always wrong
+            "JWT_WEAK_SECRET",
+            "HARDCODED_SECRETS",
+            # Logging / observability
+            "LOGGING_DISABLED",
+            # Cloud SSRF sinks — direct IP/hostname is always a finding
+            "AWS_METADATA_ACCESS",
+            "GCP_METADATA_ACCESS",
+            "AZURE_METADATA_ACCESS",
+            "IMDS_TOKENLESS",
+            # Supply-chain / dependency manifest rules (config files)
+            "A06_NPM_RESOLVED_HTTP",
+            "A06_NPM_REGISTRY_HTTP",
+            "A06_PYTHON_VCS_DEP",
+            "A06_PIPFILE_VCS",
+            "VULNERABLE_COMPONENTS",
+        }
+
+        if slice_obj.pattern_type == "REGEX" and slice_obj.rule_id in _PRESENCE_VULN_RULES:
+            llm_result = self._get_static_only_result(slice_obj)
+        elif self.enable_llm and self.llm_service:
             llm_result = await self.llm_service.classify_code_slice(
                 code_snippet=slice_obj.code_snippet,
                 rule_name=slice_obj.rule_name,
@@ -171,20 +204,21 @@ class SliceClassifier:
     
     def _get_static_only_result(self, slice_obj: CodeSlice) -> LLMClassificationResult:
         """
-        Get fallback result when LLM is disabled.
-        Uses static analysis only.
+        Get fallback result when LLM is disabled or bypassed.
+        Uses static analysis only — treats the finding as VULNERABLE.
         """
         from semantic_engine.classifier.llm_service import LLMClassificationResult
-        
+        conf_map = {"high": 0.85, "medium": 0.65, "low": 0.45, "critical": 0.90}
+        conf = conf_map.get((slice_obj.confidence or "").lower(), 0.65)
         return LLMClassificationResult(
-            classification=Classification.LIKELY_VULNERABLE,
+            classification=Classification.VULNERABLE,
             explanation=slice_obj.reason,
             severity=slice_obj.severity,
-            exploitability_score=0.6,
-            remediation="Review code manually and apply input validation/sanitization",
+            exploitability_score=conf,
+            remediation="Apply input validation/sanitization or replace with a safe alternative.",
             cwe=slice_obj.cwe,
             owasp=slice_obj.owasp,
-            confidence=0.5
+            confidence=conf
         )
     
     def _combine_results(

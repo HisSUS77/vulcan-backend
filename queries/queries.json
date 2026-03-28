@@ -54,7 +54,14 @@
       "quote",
       "prepare"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "['\\\"]SELECT[^'\\\"]*['\\\"\\s]+\\+",
+      "execute\\s*\\(\\s*f['\\\"]",
+      "cursor\\.execute\\s*\\([^)]*\\+",
+      "db\\.execute\\s*\\([^)]*\\+",
+      "SELECT.*WHERE.*\\+"
+    ]
   },
   "COMMAND_INJECTION": {
     "rule_id": "COMMAND_INJECTION",
@@ -100,7 +107,12 @@
       "shell=False",
       "allowlist"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "os\\.system\\s*\\(",
+      "os\\.popen\\s*\\(",
+      "subprocess\\.(call|Popen|run|check_call|check_output)\\s*\\("
+    ]
   },
   "CODE_INJECTION": {
     "rule_id": "CODE_INJECTION",
@@ -141,7 +153,13 @@
       "ast.literal_eval",
       "json.loads"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "eval\\s*\\(",
+      "exec\\s*\\(",
+      "execfile\\s*\\(",
+      "__import__\\s*\\("
+    ]
   },
   "XSS": {
     "rule_id": "XSS",
@@ -185,7 +203,14 @@
       "DOMPurify",
       "sanitize"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "\\.innerHTML\\s*=",
+      "\\.outerHTML\\s*=",
+      "document\\.write\\s*\\(",
+      "dangerouslySetInnerHTML",
+      "render_template_string\\s*\\("
+    ]
   },
   "PATH_TRAVERSAL": {
     "rule_id": "PATH_TRAVERSAL",
@@ -229,7 +254,13 @@
       "path.resolve",
       "allowlist"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "open\\s*\\([^)]*\\+",
+      "open\\s*\\([^)]*user",
+      "os\\.path\\.join\\s*\\([^)]*(?:request|args|query|param|user)",
+      "pathlib\\.Path\\s*\\([^)]*\\+"
+    ]
   },
   "SSRF": {
     "rule_id": "SSRF",
@@ -271,7 +302,12 @@
       "urlparse",
       "URL"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "requests\\.(get|post|put|delete|request)\\s*\\(",
+      "urllib\\.request\\.urlopen\\s*\\(",
+      "httpx\\.(get|post)\\s*\\("
+    ]
   },
   "BROKEN_ACCESS_CONTROL": {
     "rule_id": "BROKEN_ACCESS_CONTROL",
@@ -343,7 +379,12 @@
       "yaml.safe_load",
       "json.loads"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "pickle\\.loads?\\s*\\(",
+      "yaml\\.load\\s*\\(",
+      "yaml\\.unsafe_load\\s*\\("
+    ]
   },
   "WEAK_CRYPTO": {
     "rule_id": "WEAK_CRYPTO",
@@ -379,7 +420,12 @@
       "RC4",
       "ECB"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "hashlib\\.(md5|sha1)\\s*\\(",
+      "crypto\\.createHash\\s*\\(['\\\"](?:md5|sha1)['\\\"]",
+      "(?<!\\w)(?:md5|sha1)\\s*\\("
+    ]
   },
   "HARDCODED_SECRETS": {
     "rule_id": "HARDCODED_SECRETS",
@@ -560,7 +606,8 @@
     ],
     "regex_patterns": [
       "Access-Control-Allow-Origin.*\\*",
-      "cors\\(.*origin:\\s*['\"]\\*['\"]"
+      "cors\\(.*origins?\\s*[:=]\\s*['\\\"]?\\*['\\\"]?",
+      "CORS\\s*\\([^)]*origins\\s*=\\s*['\\\"]?\\*['\\\"]?"
     ],
     "confidence": "high"
   },
@@ -618,7 +665,11 @@
       "DFG_FLOW"
     ],
     "sanitizers": [],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "eval\\s*\\(",
+      "new\\s+Function\\s*\\("
+    ]
   },
   "TEMPLATE_INJECTION": {
     "rule_id": "TEMPLATE_INJECTION",
@@ -653,7 +704,12 @@
       "escape",
       "autoescape"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "render_template_string\\s*\\(",
+      "jinja2\\.Template\\s*\\(",
+      "Environment\\s*\\(.*\\)\\.from_string\\s*\\("
+    ]
   },
   "NOSQL_INJECTION": {
     "rule_id": "NOSQL_INJECTION",
@@ -719,7 +775,11 @@
       "secrets",
       "crypto.randomBytes"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "(?<![a-zA-Z_])random\\.(random|randint|choice|randrange|uniform)\\s*\\(",
+      "Math\\.random\\s*\\("
+    ]
   },
   "UNVALIDATED_REDIRECT": {
     "rule_id": "UNVALIDATED_REDIRECT",
@@ -796,8 +856,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "jwt\\.decode\\(.*algorithms.*none",
-      "algorithms:\\s*\\[[^\\]]*['\"]none['\"]"
+      "jwt\\.decode\\(.*algorithms.*['\\\"]none['\\\"]",
+      "algorithms\\s*=\\s*\\[[^\\]]*['\\\"]none['\\\"]"
     ],
     "sanitizers": [],
     "confidence": "high"
@@ -912,7 +972,12 @@
       "logger.debug",
       "print",
       "console.log",
-      "console.error"
+      "console.error",
+      "logging.info",
+      "logging.debug",
+      "logging.warning",
+      "logging.error",
+      "logging.getLogger"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -920,7 +985,12 @@
     "sanitizers": [
       "sanitize_log"
     ],
-    "confidence": "low"
+    "confidence": "low",
+    "regex_patterns": [
+      "(?:logging|logger)\\.(info|debug|warning|error|critical)\\s*\\(",
+      "print\\s*\\(",
+      "console\\.(log|error|warn)\\s*\\("
+    ]
   },
   "UNRESTRICTED_FILE_UPLOAD": {
     "rule_id": "UNRESTRICTED_FILE_UPLOAD",
@@ -951,7 +1021,12 @@
       "validate_file_type",
       "allowed_file"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "request\\.files",
+      "req\\.files",
+      "\\.save\\s*\\("
+    ]
   },
   "INSECURE_COOKIE": {
     "rule_id": "INSECURE_COOKIE",
@@ -1038,9 +1113,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "http://.*password",
-      "http://.*token",
-      "http://.*api[_-]?key"
+      "http://[^\\s'\\\"]+(?:password|token|api.?key|secret|credential)",
+      "['\\\"]http://[^'\\\"]+['\\\"]"
     ],
     "sanitizers": [],
     "confidence": "medium"
@@ -1095,7 +1169,11 @@
     "sanitizers": [
       "validate_path"
     ],
-    "confidence": "high"
+    "confidence": "high",
+    "regex_patterns": [
+      "(?:zipfile|tarfile)\\.(?:extract|extractall)\\s*\\(",
+      "\\.extractall\\s*\\("
+    ]
   },
   "REGEX_DOS": {
     "rule_id": "REGEX_DOS",
@@ -1145,7 +1223,10 @@
     "regex_patterns": [
       "debug\\s*=\\s*True",
       "app\\.run\\(.*debug",
-      "app\\.use\\(.*errorHandler"
+      "return\\s+str\\s*\\(\\s*e\\s*\\)",
+      "traceback\\.format_exc\\s*\\(",
+      "return\\s+traceback",
+      "str\\s*\\(\\s*exception\\s*\\)"
     ],
     "sanitizers": [],
     "confidence": "medium"
@@ -1207,7 +1288,12 @@
       "DFG_FLOW"
     ],
     "sanitizers": [],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "jsonify\\s*\\([^)]*(?:password|token|secret|key)",
+      "json\\.dumps\\s*\\([^)]*(?:password|token|secret|key)",
+      "(?:password|secret|token|api_key)\\s*['\\\"][^'\\\"]*['\\\"]"
+    ]
   },
   "CLICKJACKING_NO_HEADER": {
     "rule_id": "CLICKJACKING_NO_HEADER",
@@ -1329,16 +1415,16 @@
       "(?m)^[A-Za-z0-9_.-]+\\s*@\\s*(?:git\\+|https?://|ssh://).*$"
     ],
     "file_patterns": [
-      "(?i)(^|/)requirements(?:[-_].+)?\\\\.txt$",
-      "(?i)(^|/)pipfile(\\\\.lock)?$",
-      "(?i)(^|/)pyproject\\\\.toml$",
-      "(?i)(^|/)poetry\\\\.lock$",
-      "(?i)(^|/)setup\\\\.cfg$",
-      "(?i)(^|/)package\\\\.json$",
-      "(?i)(^|/)package-lock\\\\.json$",
-      "(?i)(^|/)npm-shrinkwrap\\\\.json$",
-      "(?i)(^|/)yarn\\\\.lock$",
-      "(?i)(^|/)pnpm-lock\\\\.yaml$"
+      "(?i)(^|/)requirements(?:[-_].+)?\\.txt$",
+      "(?i)(^|/)pipfile(\\.lock)?$",
+      "(?i)(^|/)pyproject\\.toml$",
+      "(?i)(^|/)poetry\\.lock$",
+      "(?i)(^|/)setup\\.cfg$",
+      "(?i)(^|/)package\\.json$",
+      "(?i)(^|/)package-lock\\.json$",
+      "(?i)(^|/)npm-shrinkwrap\\.json$",
+      "(?i)(^|/)yarn\\.lock$",
+      "(?i)(^|/)pnpm-lock\\.yaml$"
     ],
     "confidence": "medium"
   },
@@ -1358,12 +1444,12 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)@app\\\\.route\\\\([^\\n]*?/admin",
-      "(?i)@router\\\\.get\\\\([^\\n]*?/admin",
-      "(?i)app\\\\.(get|post|put|delete)\\\\([^\\n]*?/admin"
+      "(?i)@app\\.route\\([^)]*?/admin",
+      "(?i)@router\\.get\\([^)]*?/admin",
+      "(?i)app\\.(get|post|put|delete)\\([^)]*?/admin"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "low"
   },
@@ -1382,13 +1468,13 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)\"resolved\"\\\\s*:\\\\s*\"http://"
+      "(?i)\"resolved\"\\s*:\\s*\"http://"
     ],
     "file_patterns": [
-      "(?i)(^|/)package-lock\\\\.json$",
-      "(?i)(^|/)npm-shrinkwrap\\\\.json$",
-      "(?i)(^|/)yarn\\\\.lock$",
-      "(?i)(^|/)pnpm-lock\\\\.yaml$"
+      "(?i)(^|/)package-lock\\.json$",
+      "(?i)(^|/)npm-shrinkwrap\\.json$",
+      "(?i)(^|/)yarn\\.lock$",
+      "(?i)(^|/)pnpm-lock\\.yaml$"
     ],
     "confidence": "medium"
   },
@@ -1407,10 +1493,10 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?im)^registry\\\\s*=\\\\s*http://"
+      "(?im)registry\\s*=\\s*http://"
     ],
     "file_patterns": [
-      "(?i)(^|/)\\\\.npmrc$"
+      "(?i)(^|/)\\.npmrc$"
     ],
     "confidence": "medium"
   },
@@ -1428,12 +1514,12 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?m)^(?:-e\\\\s+)?(?:git\\\\+|hg\\\\+|svn\\\\+|bzr\\\\+).*$"
+      "(?m)(?:-e\\s+)?(?:git\\+|hg\\+|svn\\+|bzr\\+)[^\\s]+"
     ],
     "file_patterns": [
-      "(?i)(^|/)requirements(?:[-_].+)?\\\\.txt$",
+      "(?i)(^|/)requirements(?:[-_].+)?\\.txt$",
       "(?i)(^|/)pipfile$",
-      "(?i)(^|/)pyproject\\\\.toml$"
+      "(?i)(^|/)pyproject\\.toml$"
     ],
     "confidence": "medium"
   },
@@ -1451,7 +1537,7 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?m)^\\\\w+\\\\s*=\\\\s*\\\\{[^\\n]*?(git|hg|svn|bzr)\\\\s*="
+      "(?m)\\w+\\s*=\\s*\\{[^\\n]*?(git|hg|svn|bzr)\\s*="
     ],
     "file_patterns": [
       "(?i)(^|/)pipfile$"
@@ -1478,7 +1564,7 @@
       "(?i)(admin|root)\\s*[:=]\\s*[\\\"\\'](admin|root|password|1234|123456)[\\\"\\']"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx|json|yaml|yml)$"
+      "(?i)\\.(py|js|ts|tsx|json|yaml|yml)$"
     ],
     "confidence": "medium"
   },
@@ -1498,11 +1584,11 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)(curl|wget)\\\\s+[^\\n]*\\\\|\\\\s*(sh|bash)",
-      "(?i)Invoke-WebRequest\\\\s+[^\\n]*\\\\|\\\\s*iex"
+      "(?i)(curl|wget)\\s+[^\\n]*\\|\\s*(sh|bash)",
+      "(?i)Invoke-WebRequest\\s+[^\\n]*\\|\\s*iex"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx|sh|ps1)$"
+      "(?i)\\.(py|js|ts|tsx|sh|ps1)$"
     ],
     "confidence": "high"
   },
@@ -1522,11 +1608,11 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)(curl|wget)\\\\s+[^\\n]*-o\\\\s+[^\\n]+\\\\n[^\\n]*(chmod\\\\s+\\\\+x|\\\\.\\\\/)",
-      "(?i)download\\\\w*\\\\([^\\n]*\\\\);\\\\s*(exec|spawn)\\\\w*\\\\("
+      "(?i)(curl|wget)\\s+[^\\n]+-o\\s+[^\\n]+\\n[^\\n]*(chmod\\s+\\+x|\\.\\/)",
+      "(?i)download\\w*\\([^\\n]*\\);\\s*(exec|spawn)\\w*\\("
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx|sh)$"
+      "(?i)\\.(py|js|ts|tsx|sh)$"
     ],
     "confidence": "medium"
   },
@@ -1546,12 +1632,12 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)logging\\\\.disable\\\\(",
-      "(?i)logger\\\\.disabled\\\\s*=\\\\s*True",
-      "(?i)console\\\\.(log|error|warn)\\\\s*=\\\\s*null"
+      "(?i)logging\\.disable\\(",
+      "(?i)logger\\.disabled\\s*=\\s*True",
+      "(?i)console\\.(log|error|warn)\\s*=\\s*null"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "medium"
   },
@@ -1571,11 +1657,11 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)(logger\\\\.|logging\\\\.)\\\\w+\\\\([^\\n]*(password|token|secret)",
-      "(?i)console\\\\.(log|error|warn)\\\\([^\\n]*(password|token|secret)"
+      "(?i)(?:logger\\.|logging\\.)\\w+\\([^\\n]*(password|token|secret)",
+      "(?i)console\\.(log|error|warn)\\([^\\n]*(password|token|secret)"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "medium"
   },
@@ -1593,10 +1679,12 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?im)^\\\\s*except\\\\s+.*:\\\\s*\\\\n\\\\s*pass\\\\s*$"
+      "(?im)^\\s*except\\s+.*:\\s*\\n\\s*pass\\s*$",
+      "except\\s*:\\s*\\n\\s*pass",
+      "except\\s+\\w+\\s*:\\s*\\n\\s*pass"
     ],
     "file_patterns": [
-      "(?i)\\\\.py$"
+      "(?i)\\.py$"
     ],
     "confidence": "low"
   },
@@ -1616,11 +1704,11 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)@app\\\\.errorhandler\\\\([^\\n]*\\\\):",
-      "(?i)app\\\\.use\\\\([^\\n]*error\\\\)"
+      "(?i)@app\\.errorhandler\\([^\\n]*\\):",
+      "(?i)app\\.use\\([^\\n]*error\\)"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "low"
   },
@@ -1640,10 +1728,10 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)169\\\\.254\\\\.169\\\\.254"
+      "169\\.254\\.169\\.254"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "high"
   },
@@ -1663,10 +1751,10 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)metadata\\\\.google\\\\.internal"
+      "metadata\\.google\\.internal"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "high"
   },
@@ -1686,10 +1774,10 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)169\\\\.254\\\\.169\\\\.254/metadata/instance"
+      "169\\.254\\.169\\.254/metadata/instance"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "high"
   },
@@ -1712,7 +1800,7 @@
       "(?i)X-aws-ec2-metadata-token"
     ],
     "file_patterns": [
-      "(?i)\\\\.(py|js|ts|tsx)$"
+      "(?i)\\.(py|js|ts|tsx)$"
     ],
     "confidence": "low"
   }

@@ -12,7 +12,10 @@ from app.patch_module.models import (
     PatchValidateResponse,
     PatchApplyResponse,
     PatchExportResponse,
+    PatchReviewResponse,
+    PatchHistoryItem,
 )
+from typing import List
 from app.patch_module.orchestrator import PatchOrchestrator
 
 
@@ -112,5 +115,54 @@ async def export_patch(
         )
     except ResourceNotFoundException as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.post("/{patch_id}/approve", response_model=PatchReviewResponse)
+@require_role(UserRole.PREMIUM, UserRole.ADMIN)
+async def approve_patch(
+    patch_id: str,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """FR-M6.10: Approve a patch for deployment."""
+    orchestrator = PatchOrchestrator(db)
+    try:
+        return await orchestrator.approve(patch_id, user_id=user["id"])
+    except ResourceNotFoundException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.post("/{patch_id}/reject", response_model=PatchReviewResponse)
+@require_role(UserRole.PREMIUM, UserRole.ADMIN)
+async def reject_patch(
+    patch_id: str,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """FR-M6.10: Reject a patch before deployment."""
+    orchestrator = PatchOrchestrator(db)
+    try:
+        return await orchestrator.reject(patch_id, user_id=user["id"])
+    except ResourceNotFoundException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.get("/vulnerability/{vulnerability_id}/history", response_model=List[PatchHistoryItem])
+@require_role(UserRole.PREMIUM, UserRole.ADMIN)
+async def patch_history(
+    vulnerability_id: str,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """FE-5: Historical patch records for audit and traceability."""
+    orchestrator = PatchOrchestrator(db)
+    try:
+        return await orchestrator.list_for_vulnerability(vulnerability_id)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))

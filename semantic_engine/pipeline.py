@@ -402,14 +402,14 @@ class SemanticPipeline:
         for path in repo_root.rglob("*"):
             if not path.is_file():
                 continue
-            if path.name not in file_names:
+            if path.name.lower() not in file_names:
                 continue
             if any(part in exclude_dirs for part in path.parts):
                 continue
 
             rel_path = str(path.relative_to(repo_root)).replace("\\", "/")
-            if allowed and rel_path not in allowed:
-                continue
+            # Config/manifest files are always included for A06 rules —
+            # do NOT filter them by the source-file allowed set.
             try:
                 code = path.read_text(encoding="utf-8", errors="ignore")
             except Exception:

@@ -143,13 +143,13 @@ class QueryExecutor:
         for p in query.patterns:
             if p.startswith("CALL(") and p.endswith(")"):
                 token = p[len("CALL("):-1]
-                patterns.append(rf"{token}\\s*\\(")
+                patterns.append(f"{token}\\s*\\(")
             if p.startswith("ASSIGNMENT(") and p.endswith(")"):
                 token = p[len("ASSIGNMENT("):-1]
-                patterns.append(rf"{token}\\s*=\\s*")
+                patterns.append(f"{token}\\s*=\\s*")
             if p.startswith("LITERAL(") and p.endswith(")"):
                 token = p[len("LITERAL("):-1]
-                patterns.append(rf"['\\\"]{token}['\\\"]")
+                patterns.append(f"['\"{token}'\"]")
 
         if not patterns:
             return []
