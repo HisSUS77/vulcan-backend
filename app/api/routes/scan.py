@@ -3,12 +3,13 @@ Scan Routes - Production Vulnerability Detection Endpoints
 POST /scan - Full semantic analysis with LLM classification
 POST /debug/scan-demo - Quick demo scan for testing
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import logging
 import os
 
+from app.api.deps import get_current_user
 from semantic_engine.pipeline import get_pipeline, PipelineConfig
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class ScanResponse(BaseModel):
 
 
 @router.post("", response_model=ScanResponse)
-async def scan_code(request: ScanRequest):
+async def scan_code(request: ScanRequest, user=Depends(get_current_user)):
     """
     Scan code for security vulnerabilities.
     

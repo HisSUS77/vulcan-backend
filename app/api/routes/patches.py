@@ -23,7 +23,6 @@ router = APIRouter(prefix="/patches", tags=["patches"])
 
 
 @router.post("/generate", response_model=PatchGenerateResponse, status_code=201)
-@require_role(UserRole.PREMIUM, UserRole.ADMIN)
 async def generate_patch(
     payload: PatchGenerateRequest,
     user=Depends(get_current_user),
@@ -66,7 +65,6 @@ async def generate_patch(
 
 
 @router.post("/{patch_id}/validate", response_model=PatchValidateResponse)
-@require_role(UserRole.PREMIUM, UserRole.ADMIN)
 async def validate_patch(
     patch_id: str,
     user=Depends(get_current_user),
@@ -154,7 +152,6 @@ async def reject_patch(
 
 
 @router.get("/vulnerability/{vulnerability_id}/history", response_model=List[PatchHistoryItem])
-@require_role(UserRole.PREMIUM, UserRole.ADMIN)
 async def patch_history(
     vulnerability_id: str,
     user=Depends(get_current_user),
