@@ -508,12 +508,8 @@ class PromptBuilder:
         file_path: Optional[str] = None,
     ) -> str:
         """
-        Chain-of-thought reasoning prompt (Step 1 of CoT generation).
-
-        Asks the model to reason about the vulnerability *before* producing a diff.
-        Output is structured prose — never a diff. The reasoning text is then fed
-        back as prior assistant context in the diff generation call (Step 2), so the
-        model produces a more precise, minimal patch.
+        Legacy 6-question CoT reasoning prompt — kept for test compatibility.
+        Prefer build_industrial_cot_prompt() for production generation.
         """
         language  = (language  or "python").lower()
         vuln_key  = (vuln_type or "").lower().replace(" ", "").replace("-", "").replace("_", "")
@@ -557,6 +553,193 @@ class PromptBuilder:
             "4. SECURE REPLACEMENT: What is the exact secure code that replaces each vulnerable line?",
             "5. IMPORTS NEEDED: Any new imports required by the fix? (list or 'none')",
             "6. RISK OF CHANGE: What could break if the fix is applied incorrectly?",
+        ]
+
+        return "\n".join(parts).strip() + "\n"
+
+    @staticmethod
+    def build_industrial_cot_prompt(
+        language: str,
+        vuln_type: str,
+        cwe: Optional[str],
+        owasp: Optional[str],
+        vulnerable_slice: str,
+        context_before_after: Optional[str],
+        taint_path: Optional[list | str],
+        sink: Optional[str],
+        source: Optional[str],
+        file_path: Optional[str] = None,
+    ) -> str:
+        """
+        Industrial-grade 4-phase adversarial Chain-of-Thought prompt.
+
+        Modelled after the security analysis protocols used in production
+        AI security tools (Snyk, Semgrep, GitHub Advanced Security) and
+        academic research on LLM-based patch generation (VulRepair, SWE-bench).
+
+        PHASE 1 — THREAT MODELING
+          Forces the model to think like an attacker first: map the full
+          attack surface, construct a concrete exploit payload, estimate CVSS.
+
+        PHASE 2 — FIX DESIGN
+          Least-to-most decomposition: identify root cause → name the secure
+          API → specify exact REMOVE/ADD lines → enumerate new imports →
+          rate breakage risk. Grounds the model on minimal-change principle.
+
+        PHASE 3 — ADVERSARIAL SELF-VERIFICATION
+          The model now plays the role of attacker against its own proposed fix.
+          It must try every bypass (encoding, type coercion, edge cases) and
+          either confirm the fix is complete or strengthen it. This is the key
+          step missing from standard CoT implementations.
+
+        PHASE 4 — FORMAL PATCH SPECIFICATION
+          Produces a machine-readable PATCH_SPEC_BEGIN...PATCH_SPEC_END block
+          that the diff generator reads in Call 2. The spec is the formal
+          contract: REMOVE[N]/ADD[N] lines, NEW_IMPORT, BREAKAGE_RISK, and
+          BYPASS_FOUND flag. Eliminates ambiguity between reasoning and diff.
+
+        Output: plain structured text ending with the PATCH_SPEC block.
+        """
+        language    = (language  or "python").lower()
+        vuln_key    = (vuln_type or "").lower().replace(" ", "").replace("-", "").replace("_", "")
+        rules       = PromptBuilder._rules_for_vuln(language, vuln_key)
+        taint_repr  = taint_path if isinstance(taint_path, str) else str(taint_path or "")
+        context     = (context_before_after or "").strip()
+        slice_block = vulnerable_slice.strip()
+        diff_file   = file_path.lstrip("/\\") if file_path else "target_file"
+
+        bar = "═" * 60
+
+        parts = [
+            bar,
+            "VULNERABILITY SECURITY ANALYSIS — CHAIN-OF-THOUGHT PROTOCOL",
+            bar,
+            "",
+            "You are a Principal Security Engineer conducting a formal code security review.",
+            "Work through the four phases below with precision and adversarial rigour.",
+            "Output ONLY plain structured text following this exact protocol.",
+            "NO diffs. NO code blocks. NO markdown. NO backticks.",
+            "",
+            "─" * 40,
+            "VULNERABILITY PROFILE",
+            "─" * 40,
+            f"File:          {diff_file}",
+            f"Language:      {language.upper()}",
+            f"Type:          {vuln_type}",
+            f"CWE:           {cwe or 'N/A'}",
+            f"OWASP:         {owasp or 'N/A'}",
+            f"Taint Source:  {source or 'unknown'}",
+            f"Taint Sink:    {sink or 'unknown'}",
+            "",
+            "AUTHORITATIVE REMEDIATION RULE:",
+            rules,
+        ]
+
+        if taint_repr and taint_repr not in ("[]", "None", ""):
+            parts += [
+                "",
+                "TAINT FLOW PATH (source → sink):",
+                taint_repr,
+            ]
+
+        if context:
+            parts += [
+                "",
+                "SURROUNDING CODE CONTEXT:",
+                context,
+            ]
+
+        parts += [
+            "",
+            "VULNERABLE CODE SLICE:",
+            slice_block,
+            "",
+            bar,
+            "PHASE 1 — THREAT MODELING",
+            bar,
+            "",
+            "T1.1  ATTACK SURFACE",
+            "      Identify every user-controlled input that flows into the vulnerable code.",
+            "      For each input point state: input name, entry method, and path to the sink.",
+            "",
+            "T1.2  CONCRETE EXPLOIT",
+            "      Write one concrete exploit payload that would succeed against this exact code.",
+            "      Be specific — show exact values, HTTP parameters, or API calls.",
+            "",
+            "T1.3  ATTACK OUTCOME",
+            "      What can a successful attacker achieve?",
+            "      (data exfiltration / RCE / privilege escalation / DoS / other)",
+            "",
+            "T1.4  CVSS 3.1 ESTIMATE",
+            "      State: AV / AC / PR / UI / S / C / I / A and rough base score (0.0–10.0).",
+            "",
+            bar,
+            "PHASE 2 — FIX DESIGN",
+            bar,
+            "",
+            "F2.1  ROOT CAUSE (one sentence)",
+            "      State the exact coding anti-pattern that creates the vulnerability.",
+            "",
+            "F2.2  SECURE PATTERN",
+            "      Name the exact secure API, function, or library that replaces the vulnerable one.",
+            "      Explain in one sentence why this alternative is safe against the Phase 1 exploit.",
+            "",
+            "F2.3  MINIMAL CHANGE SPECIFICATION",
+            "      List ONLY the lines that must change. Use this format for each:",
+            "        REMOVE: \"<exact vulnerable line as it appears in the code>\"",
+            "        ADD:    \"<exact secure replacement line>\"",
+            "      Quote lines verbatim. Preserve indentation.",
+            "",
+            "F2.4  NEW IMPORTS / REQUIRES",
+            "      List every new import or require statement the fix needs.",
+            "      State 'none' if no new imports are needed.",
+            "",
+            "F2.5  BREAKAGE RISK",
+            "      Rate: LOW / MEDIUM / HIGH.",
+            "      Explain: which callers, tests, or behaviours might break?",
+            "",
+            bar,
+            "PHASE 3 — ADVERSARIAL SELF-VERIFICATION",
+            bar,
+            "",
+            "A3.1  BYPASS ANALYSIS",
+            "      Switch role: you are now an attacker reviewing the fix in F2.3.",
+            "      Try every bypass technique:",
+            "        - Encoding variations (URL-encode, unicode, hex escapes)",
+            "        - Type coercion (pass int/array where string expected)",
+            "        - Null/empty/boundary inputs",
+            "        - Second-order injection (stored then retrieved)",
+            "        - Race conditions or TOCTOU",
+            "      Answer YES (the fix can be bypassed — explain how) or",
+            "              NO  (the fix is complete — explain why each bypass fails).",
+            "",
+            "A3.2  FIX STRENGTHENING",
+            "      If A3.1 is YES, state the amended REMOVE/ADD lines that close the bypass.",
+            "      If A3.1 is NO, repeat the F2.3 specification unchanged.",
+            "",
+            "A3.3  FINAL VERDICT",
+            "      State the definitive secure replacement after adversarial review.",
+            "      This is the authoritative specification the diff generator will use.",
+            "",
+            bar,
+            "PHASE 4 — FORMAL PATCH SPECIFICATION",
+            bar,
+            "",
+            "Output this exact block at the end of your analysis.",
+            "Fill in <placeholders>. Use one REMOVE/ADD pair per changed line.",
+            "If more than one line changes, add REMOVE[2]/ADD[2], REMOVE[3]/ADD[3], etc.",
+            "",
+            "PATCH_SPEC_BEGIN",
+            f"FILE: {diff_file}",
+            f"LANGUAGE: {language}",
+            f"VULN_TYPE: {vuln_type}",
+            "CHANGE_COUNT: <number of lines changed>",
+            "REMOVE[1]: <exact vulnerable line verbatim>",
+            "ADD[1]:    <exact secure replacement verbatim>",
+            "NEW_IMPORT[1]: <import statement or NONE>",
+            "BREAKAGE_RISK: <LOW|MEDIUM|HIGH>",
+            "BYPASS_FOUND: <YES|NO>",
+            "PATCH_SPEC_END",
         ]
 
         return "\n".join(parts).strip() + "\n"

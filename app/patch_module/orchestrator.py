@@ -63,8 +63,8 @@ class PatchOrchestrator:
             file_path=ctx.file_path,
         )
 
-        # Build chain-of-thought reasoning prompt for first attempt.
-        cot_reasoning_prompt = PromptBuilder.build_cot_reasoning_prompt(
+        # Build industrial 4-phase adversarial CoT prompt for first attempt.
+        industrial_cot_prompt = PromptBuilder.build_industrial_cot_prompt(
             language=ctx.language,
             vuln_type=ctx.vuln_type,
             cwe=ctx.cwe,
@@ -78,7 +78,7 @@ class PatchOrchestrator:
         )
 
         # ── Self-critique retry loop ───────────────────────────────────────────
-        # Attempt 0: CoT (reason → diff) for highest first-pass quality.
+        # Attempt 0: Industrial CoT (4-phase analysis → PATCH_SPEC → diff).
         # Attempts 1-2: critique prompt — model already has failure context.
         # We keep the best attempt (highest confidence), not just the last.
         _MAX_ATTEMPTS = 3
@@ -93,9 +93,9 @@ class PatchOrchestrator:
         for attempt in range(_MAX_ATTEMPTS):
             generation_attempts = attempt + 1
             if attempt == 0:
-                # CoT: reason about the vulnerability first, then generate the diff.
-                unified_diff = await self.llm.generate_patch_with_cot(
-                    cot_reasoning_prompt, original_prompt
+                # Industrial CoT: 4-phase adversarial analysis → PATCH_SPEC → diff.
+                unified_diff = await self.llm.generate_patch_with_industrial_cot(
+                    industrial_cot_prompt, original_prompt
                 )
             else:
                 # Critique retry: current_prompt already contains failure context.

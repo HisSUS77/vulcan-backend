@@ -62,6 +62,60 @@ def test_build_cot_reasoning_prompt_no_diff_output():
     assert "XSS" in prompt
 
 
+def test_build_industrial_cot_prompt_four_phases():
+    """Industrial CoT prompt must contain all 4 phases and a PATCH_SPEC block."""
+    prompt = PromptBuilder.build_industrial_cot_prompt(
+        language="python",
+        vuln_type="SQL Injection",
+        cwe="CWE-89",
+        owasp="A03",
+        vulnerable_slice="cursor.execute('SELECT * FROM users WHERE id=' + user_id)",
+        context_before_after="def get_user(user_id):\n    cursor.execute(...)",
+        taint_path=["user_id", "cursor.execute"],
+        sink="cursor.execute",
+        source="request.args",
+        file_path="app/db.py",
+    )
+    # All four phases present
+    assert "PHASE 1" in prompt and "THREAT MODELING" in prompt
+    assert "PHASE 2" in prompt and "FIX DESIGN" in prompt
+    assert "PHASE 3" in prompt and "ADVERSARIAL" in prompt
+    assert "PHASE 4" in prompt and "PATCH SPECIFICATION" in prompt
+    # Adversarial sub-sections
+    assert "BYPASS ANALYSIS" in prompt
+    assert "BYPASS_FOUND" in prompt
+    # Formal spec block markers
+    assert "PATCH_SPEC_BEGIN" in prompt
+    assert "PATCH_SPEC_END" in prompt
+    # CVSS estimation requested
+    assert "CVSS" in prompt
+    # Must NOT request a diff
+    assert "--- a/" not in prompt
+    assert "+++ b/" not in prompt
+    # Vulnerability context embedded
+    assert "CWE-89" in prompt
+    assert "cursor.execute" in prompt
+
+
+def test_build_industrial_cot_prompt_exploit_requirement():
+    """Prompt must ask for a concrete exploit payload (T1.2)."""
+    prompt = PromptBuilder.build_industrial_cot_prompt(
+        language="javascript",
+        vuln_type="Command Injection",
+        cwe="CWE-78",
+        owasp="A03",
+        vulnerable_slice="exec('ls ' + userInput)",
+        context_before_after=None,
+        taint_path=["userInput", "exec"],
+        sink="exec",
+        source="req.query",
+    )
+    assert "CONCRETE EXPLOIT" in prompt
+    assert "ATTACK SURFACE" in prompt
+    assert "BREAKAGE_RISK" in prompt
+    assert "NEW_IMPORT" in prompt
+
+
 def test_prompt_builder_xss_js():
     prompt = PromptBuilder.build_prompt(
         language="javascript",

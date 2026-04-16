@@ -66,15 +66,15 @@ async def test_orchestrator_uses_cot_on_first_attempt(monkeypatch):
     cot_calls = []
     direct_calls = []
 
-    async def fake_generate_patch_with_cot(reasoning_prompt, diff_prompt):
-        cot_calls.append((reasoning_prompt, diff_prompt))
+    async def fake_generate_patch_with_cot(industrial_reasoning_prompt, diff_prompt):
+        cot_calls.append((industrial_reasoning_prompt, diff_prompt))
         return diff
 
     async def fake_generate_patch(prompt):
         direct_calls.append(prompt)
         return diff
 
-    monkeypatch.setattr(orchestrator.llm, "generate_patch_with_cot", fake_generate_patch_with_cot)
+    monkeypatch.setattr(orchestrator.llm, "generate_patch_with_industrial_cot", fake_generate_patch_with_cot)
     monkeypatch.setattr(orchestrator.llm, "generate_patch", fake_generate_patch)
 
     ctx = VulnerabilityContext(
@@ -93,7 +93,7 @@ async def test_orchestrator_uses_cot_on_first_attempt(monkeypatch):
 
     response = await orchestrator.generate(user_id="u-1", vulnerability_id=None, context=ctx)
 
-    # CoT must have been called exactly once (first attempt)
+    # Industrial CoT must have been called exactly once (first attempt)
     assert len(cot_calls) == 1
     # Direct generate_patch must NOT be called (confidence goal met on first try)
     assert len(direct_calls) == 0
@@ -119,7 +119,7 @@ async def test_orchestrator_retries_use_direct_generate(monkeypatch):
     cot_calls = []
     direct_calls = []
 
-    async def fake_generate_patch_with_cot(reasoning_prompt, diff_prompt):
+    async def fake_generate_patch_with_cot(industrial_reasoning_prompt, diff_prompt):
         cot_calls.append(1)
         return bad_diff  # attempt 0 fails validation
 
@@ -127,7 +127,7 @@ async def test_orchestrator_retries_use_direct_generate(monkeypatch):
         direct_calls.append(1)
         return good_diff  # retry succeeds
 
-    monkeypatch.setattr(orchestrator.llm, "generate_patch_with_cot", fake_generate_patch_with_cot)
+    monkeypatch.setattr(orchestrator.llm, "generate_patch_with_industrial_cot", fake_generate_patch_with_cot)
     monkeypatch.setattr(orchestrator.llm, "generate_patch", fake_generate_patch)
 
     ctx = VulnerabilityContext(
@@ -146,6 +146,6 @@ async def test_orchestrator_retries_use_direct_generate(monkeypatch):
 
     response = await orchestrator.generate(user_id="u-1", vulnerability_id=None, context=ctx)
 
-    assert len(cot_calls) == 1       # CoT tried once (attempt 0)
+    assert len(cot_calls) == 1       # Industrial CoT tried once (attempt 0)
     assert len(direct_calls) >= 1    # at least one retry used direct generate
     assert response.generation_attempts >= 2

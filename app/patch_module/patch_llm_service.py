@@ -28,11 +28,22 @@ class PatchLLMService:
         "Preserve all indentation and surrounding code exactly."
     )
 
-    # Reasoning system message — allows prose for chain-of-thought analysis step.
+    # Reasoning system — allows structured prose for multi-phase security analysis.
     _SYSTEM_REASONING = (
-        "You are a secure code review expert. "
-        "Analyze vulnerabilities step by step with precision. "
-        "Output only structured reasoning text — no diffs, no code blocks, no markdown."
+        "You are a Principal Security Engineer with deep expertise in application security, "
+        "secure code review, and vulnerability remediation. "
+        "You conduct thorough, adversarial security analyses following a formal protocol. "
+        "Output ONLY structured plain-text analysis — no diffs, no code blocks, no markdown."
+    )
+
+    # Diff-from-spec system — diff generator that reads a formal PATCH_SPEC.
+    _SYSTEM_DIFF_FROM_SPEC = (
+        "You are a precision patch generator. "
+        "You receive a security analysis with an embedded PATCH_SPEC block. "
+        "Your only job is to faithfully translate that PATCH_SPEC into a valid unified diff. "
+        "Change ONLY the lines listed as REMOVE in PATCH_SPEC. "
+        "Replace them with exactly the ADD lines from PATCH_SPEC. "
+        "Output ONLY the unified diff — no prose, no markdown, no code fences."
     )
 
     def __init__(self) -> None:
@@ -65,17 +76,9 @@ class PatchLLMService:
 
     async def generate_patch_with_cot(self, reasoning_prompt: str, diff_prompt: str) -> str:
         """
-        Two-step chain-of-thought patch generation.
-
-        Step 1 — Reasoning: ask the model to analyze the vulnerability (root cause,
-                 attack vector, affected lines, secure replacement). Output is prose.
-        Step 2 — Diff: feed the reasoning back as prior assistant context, then ask
-                 for the unified diff. The model has already "thought" about the fix,
-                 so the diff is more precise and minimal.
-
-        Falls back to direct generation if the reasoning step fails.
+        Legacy 2-step CoT — kept for fallback compatibility.
+        Prefer generate_patch_with_industrial_cot() for new calls.
         """
-        # ── Step 1: reasoning ──────────────────────────────────────────────────
         reasoning_messages = [
             {"role": "system", "content": self._SYSTEM_REASONING},
             {"role": "user", "content": reasoning_prompt},
@@ -83,14 +86,12 @@ class PatchLLMService:
         reasoning = await self._try_openai(reasoning_messages)
         if not reasoning:
             reasoning = await self._try_github(reasoning_messages)
-
         if not reasoning:
             logger.warning("CoT reasoning step failed; falling back to direct generation")
             return await self.generate_patch(diff_prompt)
 
         logger.debug("CoT reasoning complete (%d chars)", len(reasoning))
 
-        # ── Step 2: diff with reasoning as prior context ───────────────────────
         diff_messages = [
             {"role": "system", "content": self._SYSTEM},
             {"role": "user", "content": reasoning_prompt},
@@ -100,12 +101,93 @@ class PatchLLMService:
         response = await self._try_openai(diff_messages)
         if response:
             return self._clean_output(response)
+        response = await self._try_github(diff_messages)
+        if response:
+            return self._clean_output(response)
+        logger.warning("CoT diff step failed; returning offline template")
+        return self._offline_template_diff()
+
+    async def generate_patch_with_industrial_cot(
+        self,
+        industrial_reasoning_prompt: str,
+        diff_prompt: str,
+    ) -> str:
+        """
+        Industrial-grade 2-call Chain-of-Thought patch generation.
+
+        CALL 1 — Multi-phase adversarial security analysis:
+          Phase 1: Threat modeling  (attack surface, exploit, CVSS estimate)
+          Phase 2: Fix design       (secure pattern, minimal change spec, import analysis)
+          Phase 3: Adversarial verification (attacker tries to bypass their own fix)
+          Phase 4: Formal PATCH_SPEC (structured contract for the diff generator)
+
+        CALL 2 — Diff-from-spec generation:
+          The model receives the full Phase 1-4 analysis as prior assistant context.
+          It reads the embedded PATCH_SPEC block and translates it into a unified diff.
+          Because the spec was adversarially verified in Phase 3, the diff is precise
+          and addresses edge-case bypasses that a simple CoT would miss.
+
+        Fall-back chain: industrial → legacy CoT → direct → offline template.
+        """
+        # ── CALL 1: 4-phase adversarial security analysis ──────────────────────
+        analysis_messages = [
+            {"role": "system", "content": self._SYSTEM_REASONING},
+            {"role": "user",   "content": industrial_reasoning_prompt},
+        ]
+        analysis = await self._try_openai(analysis_messages)
+        if not analysis:
+            analysis = await self._try_github(analysis_messages)
+
+        if not analysis:
+            logger.warning("Industrial CoT analysis call failed; falling back to legacy CoT")
+            return await self.generate_patch_with_cot(industrial_reasoning_prompt, diff_prompt)
+
+        logger.debug(
+            "Industrial CoT analysis complete (%d chars, PATCH_SPEC present=%s)",
+            len(analysis),
+            "PATCH_SPEC_BEGIN" in analysis,
+        )
+
+        # ── CALL 2: translate PATCH_SPEC → unified diff ────────────────────────
+        diff_from_spec_prompt = (
+            "The security analysis above contains a PATCH_SPEC_BEGIN...PATCH_SPEC_END block.\n"
+            "Translate that specification into a valid unified diff.\n"
+            "Rules:\n"
+            "  1. REMOVE only the lines listed as REMOVE[N] in the spec.\n"
+            "  2. ADD exactly the lines listed as ADD[N] in the spec.\n"
+            "  3. Add any NEW_IMPORT lines at the correct position.\n"
+            "  4. Preserve all surrounding context lines exactly (use ' ' prefix).\n"
+            "  5. Emit correct @@ hunk line numbers.\n"
+            "  6. Start output with:  --- a/<FILE from spec>\n"
+            "YOUR ONLY OUTPUT IS A VALID UNIFIED DIFF. NO PROSE. NO CODE FENCES."
+        )
+        diff_messages = [
+            {"role": "system",    "content": self._SYSTEM_DIFF_FROM_SPEC},
+            {"role": "user",      "content": industrial_reasoning_prompt},
+            {"role": "assistant", "content": analysis},
+            {"role": "user",      "content": diff_from_spec_prompt},
+        ]
+        response = await self._try_openai(diff_messages)
+        if response:
+            return self._clean_output(response)
 
         response = await self._try_github(diff_messages)
         if response:
             return self._clean_output(response)
 
-        logger.warning("CoT diff step failed; returning offline template")
+        # Fall back: try legacy CoT with the analysis text as context
+        logger.warning("Industrial CoT diff call failed; attempting legacy CoT fallback")
+        diff_messages_fallback = [
+            {"role": "system",    "content": self._SYSTEM},
+            {"role": "user",      "content": diff_prompt},
+        ]
+        response = await self._try_openai(diff_messages_fallback)
+        if response:
+            return self._clean_output(response)
+        response = await self._try_github(diff_messages_fallback)
+        if response:
+            return self._clean_output(response)
+
         return self._offline_template_diff()
 
     async def _try_openai(self, messages: list) -> Optional[str]:
