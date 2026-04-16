@@ -13,6 +13,27 @@ class ValidationResult(APIModel):
     details: str | None = None
 
 
+class AttackAttempt(APIModel):
+    """Single adversarial attack attempt against a generated patch."""
+    name: str
+    technique: str
+    result: str          # "BLOCKED" or "BYPASSED"
+    explanation: str
+
+
+class AttackTestResult(APIModel):
+    """
+    Result of the adversarial patch attack simulation.
+    Runs after patch generation — a separate LLM call that plays attacker
+    against the secured code to verify the patch holds under real attacks.
+    """
+    overall_secure: bool
+    patch_confidence: int        # 0–100 — attacker's confidence the patch holds
+    attacks: List[AttackAttempt]
+    recommendation: str
+    raw_analysis: str            # full LLM output for transparency
+
+
 class VulnerabilityContext(APIModel):
     vulnerability_id: Optional[str] = None
     file_path: str
@@ -46,6 +67,8 @@ class PatchGenerateResponse(APIModel):
     cwe: Optional[str] = None
     owasp: Optional[str] = None
     version: int = 1
+    # Adversarial attack simulation — None if LLM unavailable
+    attack_test: Optional[AttackTestResult] = None
 
 
 class PatchValidateResponse(APIModel):

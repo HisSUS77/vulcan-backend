@@ -134,6 +134,32 @@ class PatchOrchestrator:
         score_breakdown = self._compute_score_breakdown(validations, confidence, generation_attempts)
         explanation = self._build_explanation(validations, ctx)
 
+        # ── Adversarial attack simulation ──────────────────────────────────────
+        # Run a separate LLM call that plays penetration tester against the
+        # generated patch. Non-blocking — if it fails, patch still ships.
+        attack_test = None
+        try:
+            attack_prompt = PromptBuilder.build_attack_test_prompt(
+                vuln_type=ctx.vuln_type,
+                cwe=ctx.cwe,
+                language=ctx.language,
+                vulnerable_slice=ctx.vulnerable_slice,
+                unified_diff=unified_diff,
+                source=ctx.source,
+                sink=ctx.sink,
+            )
+            attack_test = await self.llm.test_patch_against_attacks(attack_prompt)
+            if attack_test:
+                logger.info(
+                    "Attack test: overall_secure=%s patch_confidence=%d%% (%d attacks)",
+                    attack_test.overall_secure,
+                    attack_test.patch_confidence,
+                    len(attack_test.attacks),
+                )
+        except Exception as exc:
+            logger.warning("Attack simulation failed (non-fatal): %s", exc)
+        # ──────────────────────────────────────────────────────────────────────
+
         # Count existing patches for this vuln to compute version number.
         existing = await self.repo.list_by_vulnerability_ids([ctx.vulnerability_id] if ctx.vulnerability_id else [])
         version = len(existing) + 1
@@ -160,6 +186,7 @@ class PatchOrchestrator:
             "score_breakdown": score_breakdown,
             "generation_attempts": generation_attempts,
             "validations": [v.model_dump() for v in validations],
+            "attack_test": attack_test.model_dump() if attack_test else None,
             "status": status,
             "review_status": "pending_review",
             "version": version,
@@ -177,6 +204,7 @@ class PatchOrchestrator:
             score_breakdown=score_breakdown,
             generation_attempts=generation_attempts,
             validations=validations,
+            attack_test=attack_test,
             status=status,
             review_status="pending_review",
             cwe=ctx.cwe,

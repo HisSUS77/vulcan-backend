@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import logging
 from typing import Optional
 
@@ -189,6 +190,89 @@ class PatchLLMService:
             return self._clean_output(response)
 
         return self._offline_template_diff()
+
+    # ── Attack tester system message ──────────────────────────────────────────
+    _SYSTEM_ATTACK_TESTER = (
+        "You are a senior penetration tester simulating attacks against security patches. "
+        "Output ONLY a structured ATTACK_TEST_BEGIN...ATTACK_TEST_END block. "
+        "No prose. No markdown. No explanations outside the block."
+    )
+
+    async def test_patch_against_attacks(self, attack_prompt: str) -> Optional["AttackTestResult"]:
+        """
+        Adversarial patch attack simulation — runs after patch generation.
+
+        Sends the generated diff + original vulnerable code to a new LLM call
+        that plays the role of a penetration tester trying 5 specific bypass
+        techniques. Parses the structured ATTACK_TEST_BEGIN...END output and
+        returns an AttackTestResult.
+
+        Returns None if no LLM is available (non-blocking — patch still usable).
+        """
+        # Import here to avoid circular imports
+        from app.patch_module.models import AttackTestResult, AttackAttempt
+
+        messages = [
+            {"role": "system", "content": self._SYSTEM_ATTACK_TESTER},
+            {"role": "user",   "content": attack_prompt},
+        ]
+        raw = await self._try_openai(messages)
+        if not raw:
+            raw = await self._try_github(messages)
+        if not raw:
+            logger.warning("Attack test LLM call failed — skipping attack simulation")
+            return None
+
+        logger.debug("Attack test response received (%d chars)", len(raw))
+        return self._parse_attack_test(raw)
+
+    def _parse_attack_test(self, raw: str) -> Optional["AttackTestResult"]:
+        """Parse ATTACK_TEST_BEGIN...END block into AttackTestResult."""
+        from app.patch_module.models import AttackTestResult, AttackAttempt
+
+        try:
+            # Extract block
+            block_match = re.search(
+                r"ATTACK_TEST_BEGIN(.*?)ATTACK_TEST_END", raw, re.DOTALL
+            )
+            block = block_match.group(1).strip() if block_match else raw
+
+            attacks = []
+            for i in range(1, 6):
+                name_m   = re.search(rf"ATTACK\[{i}\]\.NAME:\s*(.+)", block)
+                result_m = re.search(rf"ATTACK\[{i}\]\.RESULT:\s*(BLOCKED|BYPASSED)", block, re.IGNORECASE)
+                reason_m = re.search(rf"ATTACK\[{i}\]\.REASON:\s*(.+)", block)
+                if not (name_m and result_m):
+                    continue
+                attacks.append(AttackAttempt(
+                    name=name_m.group(1).strip(),
+                    technique=name_m.group(1).strip(),
+                    result=result_m.group(1).strip().upper(),
+                    explanation=reason_m.group(1).strip() if reason_m else "",
+                ))
+
+            overall_m  = re.search(r"OVERALL:\s*(SECURE|VULNERABLE)", block, re.IGNORECASE)
+            conf_m     = re.search(r"PATCH_CONFIDENCE:\s*(\d+)", block)
+            rec_m      = re.search(r"RECOMMENDATION:\s*(.+)", block)
+
+            overall_secure   = (overall_m.group(1).upper() == "SECURE") if overall_m else True
+            patch_confidence = int(conf_m.group(1)) if conf_m else 75
+            recommendation   = rec_m.group(1).strip() if rec_m else "No additional recommendations."
+
+            # If any attack bypassed, override overall to VULNERABLE
+            if any(a.result == "BYPASSED" for a in attacks):
+                overall_secure = False
+
+            return AttackTestResult(
+                overall_secure=overall_secure,
+                patch_confidence=patch_confidence,
+                attacks=attacks,
+                recommendation=recommendation,
+                raw_analysis=raw,
+            )
+        except Exception as exc:
+            logger.error("Attack test parse failed: %s", exc)
+            return None
 
     async def _try_openai(self, messages: list) -> Optional[str]:
         api_key = os.getenv("OPENAI_API_KEY")

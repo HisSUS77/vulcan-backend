@@ -745,6 +745,120 @@ class PromptBuilder:
         return "\n".join(parts).strip() + "\n"
 
     @staticmethod
+    def build_attack_test_prompt(
+        vuln_type: str,
+        cwe: Optional[str],
+        language: str,
+        vulnerable_slice: str,
+        unified_diff: str,
+        source: Optional[str] = None,
+        sink: Optional[str] = None,
+    ) -> str:
+        """
+        Adversarial patch attack simulation prompt.
+
+        Runs AFTER a patch is generated. A separate LLM call plays the role
+        of a penetration tester who:
+          1. Knows the original vulnerability type and CWE
+          2. Has the original vulnerable code
+          3. Has the generated patch (unified diff)
+          4. Tries 5 specific attack techniques against the secured code
+
+        Each attack reports BLOCKED or BYPASSED with an explanation.
+        The model then gives an OVERALL verdict and a recommendation.
+
+        Output format: structured ATTACK_TEST_BEGIN...END block for
+        machine-readable parsing.
+        """
+        language = (language or "python").lower()
+        bar = "═" * 60
+
+        return "\n".join([
+            bar,
+            "ADVERSARIAL PATCH ATTACK SIMULATION",
+            bar,
+            "",
+            "You are a senior penetration tester reviewing a security patch.",
+            "Your mission: attempt to bypass the patch and determine if the secured",
+            "code is still exploitable. Be rigorous — assume a skilled attacker.",
+            "",
+            "Output ONLY the structured ATTACK_TEST_BEGIN block below.",
+            "NO other text. NO markdown. NO code fences.",
+            "",
+            "─" * 40,
+            "TARGET PROFILE",
+            "─" * 40,
+            f"Vulnerability:  {vuln_type}",
+            f"CWE:            {cwe or 'N/A'}",
+            f"Language:       {language.upper()}",
+            f"Taint Source:   {source or 'user input'}",
+            f"Taint Sink:     {sink or 'unknown'}",
+            "",
+            "ORIGINAL VULNERABLE CODE:",
+            vulnerable_slice.strip(),
+            "",
+            "PATCH APPLIED (unified diff):",
+            unified_diff.strip(),
+            "",
+            "─" * 40,
+            "ATTACK PROTOCOL",
+            "─" * 40,
+            "",
+            "For each technique, apply it against the SECURED code (after patch).",
+            "State BLOCKED if the patch prevents it, BYPASSED if it succeeds.",
+            "",
+            "TECHNIQUE 1 — Direct Payload",
+            f"  Craft the standard {vuln_type} payload and submit it directly.",
+            "  Does the secured code prevent this?",
+            "",
+            "TECHNIQUE 2 — Encoding Bypass",
+            "  Apply URL-encoding (%27), unicode escapes (\\u0027), double-encoding (%2527),",
+            "  or hex escapes on the malicious payload. Does encoding evade the fix?",
+            "",
+            "TECHNIQUE 3 — Type Coercion",
+            "  Submit an array, object, integer, boolean, or null instead of a string.",
+            "  Does the fix handle unexpected types safely?",
+            "",
+            "TECHNIQUE 4 — Boundary & Edge Cases",
+            "  Try: empty string, null bytes (\\x00), very long input (10 000+ chars),",
+            "  newlines (\\r\\n), Unicode control characters. Any bypass?",
+            "",
+            "TECHNIQUE 5 — Second-Order Attack",
+            "  Store a malicious payload in the database/session/file, then retrieve",
+            "  and process it later. Does the patch protect stored-then-retrieved data?",
+            "",
+            "─" * 40,
+            "OUTPUT FORMAT (copy exactly — fill placeholders)",
+            "─" * 40,
+            "",
+            "ATTACK_TEST_BEGIN",
+            "ATTACK[1].NAME: Direct Payload",
+            "ATTACK[1].RESULT: <BLOCKED|BYPASSED>",
+            "ATTACK[1].REASON: <one sentence>",
+            "",
+            "ATTACK[2].NAME: Encoding Bypass",
+            "ATTACK[2].RESULT: <BLOCKED|BYPASSED>",
+            "ATTACK[2].REASON: <one sentence>",
+            "",
+            "ATTACK[3].NAME: Type Coercion",
+            "ATTACK[3].RESULT: <BLOCKED|BYPASSED>",
+            "ATTACK[3].REASON: <one sentence>",
+            "",
+            "ATTACK[4].NAME: Boundary & Edge Cases",
+            "ATTACK[4].RESULT: <BLOCKED|BYPASSED>",
+            "ATTACK[4].REASON: <one sentence>",
+            "",
+            "ATTACK[5].NAME: Second-Order Attack",
+            "ATTACK[5].RESULT: <BLOCKED|BYPASSED>",
+            "ATTACK[5].REASON: <one sentence>",
+            "",
+            "OVERALL: <SECURE|VULNERABLE>",
+            "PATCH_CONFIDENCE: <0-100>",
+            "RECOMMENDATION: <one sentence — defense-in-depth suggestion>",
+            "ATTACK_TEST_END",
+        ]).strip() + "\n"
+
+    @staticmethod
     def build_critique_prompt(
         original_prompt: str,
         failed_diff: str,
