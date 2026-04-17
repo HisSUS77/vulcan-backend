@@ -36,6 +36,8 @@
       "executemany",
       "raw",
       "cursor.execute",
+      "cur.execute",
+      "execute",
       "connection.execute",
       "db.execute",
       "Model.objects.raw",
@@ -59,8 +61,11 @@
       "['\\\"]SELECT[^'\\\"]*['\\\"\\s]+\\+",
       "execute\\s*\\(\\s*f['\\\"]",
       "cursor\\.execute\\s*\\([^)]*\\+",
+      "cur\\.execute\\s*\\([^)]*[f'\\\"]",
+      "cur\\.execute\\s*\\(\\s*f",
       "db\\.execute\\s*\\([^)]*\\+",
-      "SELECT.*WHERE.*\\+"
+      "SELECT.*WHERE.*\\+",
+      "\\.execute\\s*\\(f['\\\"]"
     ]
   },
   "COMMAND_INJECTION": {
@@ -268,7 +273,7 @@
     "owasp": "A10",
     "cwe": "CWE-918",
     "description": "User-controlled URL used in server-side requests",
-    "severity": "high",
+    "severity": "critical",
     "languages": [
       "python",
       "javascript",
@@ -279,8 +284,15 @@
       "request.POST",
       "request.args",
       "request.form",
+      "request.json",
+      "request.data",
+      "get_json",
       "req.query",
-      "req.body"
+      "req.body",
+      "url",
+      "callback_url",
+      "avatar_url",
+      "target"
     ],
     "sinks": [
       "requests.get",
@@ -382,8 +394,10 @@
     "confidence": "high",
     "regex_patterns": [
       "pickle\\.loads?\\s*\\(",
-      "yaml\\.load\\s*\\(",
-      "yaml\\.unsafe_load\\s*\\("
+      "yaml\\.load\\s*\\([^)]*\\)",
+      "yaml\\.unsafe_load\\s*\\(",
+      "pickle\\.loads\\s*\\(\\s*(?:base64\\.b64decode|raw|data)",
+      "marshal\\.loads?\\s*\\("
     ]
   },
   "WEAK_CRYPTO": {
@@ -445,10 +459,18 @@
       "LITERAL(password|secret|key|token|api_key) AND ASSIGNMENT"
     ],
     "regex_patterns": [
-      "password\\s*=\\s*['\"]\\w+",
-      "api_key\\s*=\\s*['\"]\\w+",
-      "secret_key\\s*=\\s*['\"]\\w+",
-      "AWS_SECRET|GITHUB_TOKEN|PRIVATE_KEY"
+      "(?i)password\\s*=\\s*['\"]\\w+",
+      "(?i)api_key\\s*=\\s*['\"]\\w+",
+      "(?i)secret_key\\s*=\\s*['\"]\\w+",
+      "(?i)secret\\s*=\\s*['\"][^'\"]{4,}['\"]",
+      "(?i)jwt_secret\\s*=\\s*['\"][^'\"]+['\"]",
+      "(?i)db_password\\s*=\\s*['\"][^'\"]+['\"]",
+      "(?i)admin_password\\s*=\\s*['\"][^'\"]+['\"]",
+      "(?i)(payment|gateway|sendgrid|stripe|twilio).*key\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)token\\s*=\\s*['\"][a-zA-Z0-9_\\-]{16,}['\"]",
+      "AWS_SECRET|GITHUB_TOKEN|PRIVATE_KEY",
+      "(?i)SG\\.[a-zA-Z0-9_\\-]{20,}",
+      "(?i)pk_live_[a-zA-Z0-9]{20,}"
     ],
     "confidence": "high"
   },
@@ -536,8 +558,13 @@
     "sinks": [
       "xml.etree.ElementTree.parse",
       "lxml.etree.parse",
+      "etree.fromstring",
+      "etree.parse",
+      "etree.XMLParser",
       "XMLParser",
-      "xml2js.parseString"
+      "xml2js.parseString",
+      "ElementTree.fromstring",
+      "ET.fromstring"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -547,7 +574,16 @@
       "no_network=True"
     ],
     "sanitizers": [
-      "defusedxml"
+      "defusedxml",
+      "resolve_entities=False"
+    ],
+    "regex_patterns": [
+      "etree\\.XMLParser\\s*\\(",
+      "etree\\.fromstring\\s*\\(",
+      "etree\\.parse\\s*\\(",
+      "xml\\.etree\\.ElementTree\\.(?:parse|fromstring)\\s*\\(",
+      "lxml\\.etree\\.(?:parse|fromstring|XMLParser)\\s*\\(",
+      "yaml\\.load\\s*\\([^)]*\\)(?!.*safe)"
     ],
     "confidence": "medium"
   },
