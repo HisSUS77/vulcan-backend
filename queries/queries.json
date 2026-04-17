@@ -116,7 +116,10 @@
     "regex_patterns": [
       "os\\.system\\s*\\(",
       "os\\.popen\\s*\\(",
-      "subprocess\\.(call|Popen|run|check_call|check_output)\\s*\\("
+      "subprocess\\.(call|Popen|run|check_call|check_output)\\s*\\(",
+      "shell\\s*=\\s*True",
+      "commands\\.getoutput\\s*\\(",
+      "commands\\.getstatusoutput\\s*\\("
     ]
   },
   "CODE_INJECTION": {
@@ -323,10 +326,10 @@
   },
   "BROKEN_ACCESS_CONTROL": {
     "rule_id": "BROKEN_ACCESS_CONTROL",
-    "name": "Broken Access Control",
+    "name": "Insecure Direct Object Reference (IDOR)",
     "owasp": "A01",
     "cwe": "CWE-639",
-    "description": "Missing or inadequate authorization checks",
+    "description": "User-controlled ID used to access objects without ownership verification",
     "severity": "high",
     "languages": [
       "python",
@@ -334,27 +337,36 @@
       "typescript"
     ],
     "sources": [
-      "request.GET",
-      "request.POST",
+      "request.args",
+      "request.form",
+      "request.json",
       "req.params",
       "req.query"
     ],
     "sinks": [
-      "Model.objects.get",
-      "Model.objects.filter",
-      "db.query",
+      "cur.execute",
+      "execute",
+      "find_user_by_id",
+      "get_user",
       "findById",
       "findOne"
     ],
     "patterns": [
-      "DFG_FLOW AND NOT exists(auth_check)"
+      "DFG_FLOW"
     ],
     "required_guards": [
-      "@login_required",
-      "@permission_required",
-      "check_permission",
+      "g.user_id",
+      "session.user_id",
+      "check_ownership",
       "authorize",
-      "isAuthenticated"
+      "require_admin"
+    ],
+    "regex_patterns": [
+      "(?i)user_id\\s*=\\s*request\\.(args|form|json|get_json)\\b",
+      "(?i)user_id\\s*=\\s*req\\.(params|query|body)",
+      "(?i)account_id\\s*=\\s*request\\.(args|form|json)",
+      "(?i)\\.get\\s*\\(['\"]user_id['\"]\\)(?!.*g\\.user_id)",
+      "(?i)\\.get\\s*\\(['\"]id['\"]\\)(?!.*g\\.user_id)"
     ],
     "confidence": "medium"
   },
@@ -373,15 +385,22 @@
     "sources": [
       "request.GET",
       "request.POST",
+      "request.args",
+      "request.form",
       "request.data",
+      "request.json",
+      "get_json",
       "req.body",
-      "req.query"
+      "req.query",
+      "PARAMETER"
     ],
     "sinks": [
       "pickle.loads",
       "pickle.load",
       "yaml.load",
       "yaml.unsafe_load",
+      "marshal.loads",
+      "marshal.load",
       "JSON.parse"
     ],
     "patterns": [
@@ -389,15 +408,19 @@
     ],
     "sanitizers": [
       "yaml.safe_load",
-      "json.loads"
+      "yaml.safe_load_all",
+      "json.loads",
+      "defusedxml"
     ],
     "confidence": "high",
     "regex_patterns": [
       "pickle\\.loads?\\s*\\(",
-      "yaml\\.load\\s*\\([^)]*\\)",
+      "yaml\\.load\\s*\\(",
       "yaml\\.unsafe_load\\s*\\(",
-      "pickle\\.loads\\s*\\(\\s*(?:base64\\.b64decode|raw|data)",
-      "marshal\\.loads?\\s*\\("
+      "marshal\\.loads?\\s*\\(",
+      "jsonpickle\\.decode\\s*\\(",
+      "shelve\\.open\\s*\\(",
+      "__reduce__\\s*\\("
     ]
   },
   "WEAK_CRYPTO": {
@@ -405,8 +428,8 @@
     "name": "Weak Cryptography",
     "owasp": "A02",
     "cwe": "CWE-327",
-    "description": "Use of weak cryptographic algorithms",
-    "severity": "medium",
+    "description": "Use of weak cryptographic algorithms (MD5, SHA1, DES, RC4)",
+    "severity": "high",
     "languages": [
       "javascript",
       "typescript",
@@ -418,15 +441,9 @@
       "hashlib.sha1",
       "md5",
       "sha1",
-      "crypto.createHash('md5')",
-      "crypto.createHash('sha1')"
+      "crypto.createHash"
     ],
-    "patterns": [
-      "CALL(md5)",
-      "CALL(sha1)",
-      "CALL(DES)",
-      "CALL(RC4)"
-    ],
+    "patterns": [],
     "blacklisted_algos": [
       "md5",
       "sha1",
@@ -437,8 +454,12 @@
     "confidence": "high",
     "regex_patterns": [
       "hashlib\\.(md5|sha1)\\s*\\(",
-      "crypto\\.createHash\\s*\\(['\\\"](?:md5|sha1)['\\\"]",
-      "(?<!\\w)(?:md5|sha1)\\s*\\("
+      "hashlib\\.new\\s*\\(['\"](?:md5|sha1)['\"]",
+      "crypto\\.createHash\\s*\\(['\"](?:md5|sha1)['\"]",
+      "Crypt\\.Hash\\.(?:MD5|SHA)\\.new\\s*\\(",
+      "MD5\\.new\\s*\\(",
+      "import\\s+MD5",
+      "from\\s+Crypto\\.Hash\\s+import\\s+MD5"
     ]
   },
   "HARDCODED_SECRETS": {
@@ -455,22 +476,25 @@
     ],
     "sources": [],
     "sinks": [],
-    "patterns": [
-      "LITERAL(password|secret|key|token|api_key) AND ASSIGNMENT"
-    ],
+    "patterns": [],
     "regex_patterns": [
-      "(?i)password\\s*=\\s*['\"]\\w+",
-      "(?i)api_key\\s*=\\s*['\"]\\w+",
-      "(?i)secret_key\\s*=\\s*['\"]\\w+",
-      "(?i)secret\\s*=\\s*['\"][^'\"]{4,}['\"]",
-      "(?i)jwt_secret\\s*=\\s*['\"][^'\"]+['\"]",
-      "(?i)db_password\\s*=\\s*['\"][^'\"]+['\"]",
-      "(?i)admin_password\\s*=\\s*['\"][^'\"]+['\"]",
-      "(?i)(payment|gateway|sendgrid|stripe|twilio).*key\\s*=\\s*['\"][^'\"]{8,}['\"]",
-      "(?i)token\\s*=\\s*['\"][a-zA-Z0-9_\\-]{16,}['\"]",
-      "AWS_SECRET|GITHUB_TOKEN|PRIVATE_KEY",
-      "(?i)SG\\.[a-zA-Z0-9_\\-]{20,}",
-      "(?i)pk_live_[a-zA-Z0-9]{20,}"
+      "(?i)\\b(password|passwd|pwd)\\s*=\\s*['\"][^'\"]{3,}['\"]",
+      "(?i)\\b(secret_?key|app_?secret|flask_?secret)\\s*=\\s*['\"][^'\"]{4,}['\"]",
+      "(?i)\\b(jwt_?secret|jwt_?key)\\s*=\\s*['\"][^'\"]{4,}['\"]",
+      "(?i)\\b(db_?password|database_?password|db_?pass)\\s*=\\s*['\"][^'\"]{3,}['\"]",
+      "(?i)\\b(admin_?password|root_?password|superuser_?password)\\s*=\\s*['\"][^'\"]{3,}['\"]",
+      "(?i)\\b(api_?key|access_?key|secret_?access_?key)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)\\b(access_?token|auth_?token|bearer_?token|private_?key)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)\\b(payment_?gateway_?key|stripe_?secret|sendgrid_?api_?key|twilio_?auth_?token)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)\\b(github_?token|gitlab_?token|bitbucket_?token)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)SG\\.[a-zA-Z0-9_.\\-]{22,}",
+      "(?i)pk_live_[a-zA-Z0-9]{20,}",
+      "(?i)sk_live_[a-zA-Z0-9]{20,}",
+      "ghp_[a-zA-Z0-9]{36}",
+      "glpat-[a-zA-Z0-9_\\-]{20,}",
+      "(?i)AWS_SECRET_ACCESS_KEY\\s*=\\s*['\"][^'\"]{20,}['\"]",
+      "(?i)PRIVATE_KEY\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
     ],
     "confidence": "high"
   },
@@ -544,7 +568,7 @@
     "owasp": "A05",
     "cwe": "CWE-611",
     "description": "Unsafe XML parsing with external entities enabled",
-    "severity": "high",
+    "severity": "critical",
     "languages": [
       "python",
       "javascript",
@@ -553,6 +577,9 @@
     "sources": [
       "request.data",
       "request.body",
+      "request.args",
+      "request.form",
+      "request.get_data",
       "req.body"
     ],
     "sinks": [
@@ -564,28 +591,36 @@
       "XMLParser",
       "xml2js.parseString",
       "ElementTree.fromstring",
-      "ET.fromstring"
+      "ET.fromstring",
+      "minidom.parseString",
+      "minidom.parse",
+      "sax.parseString",
+      "sax.parse"
     ],
     "patterns": [
       "DFG_FLOW"
     ],
-    "required_settings": [
-      "resolve_entities=False",
-      "no_network=True"
-    ],
     "sanitizers": [
       "defusedxml",
-      "resolve_entities=False"
+      "resolve_entities=False",
+      "defusedxml.ElementTree",
+      "defusedxml.minidom",
+      "defusedxml.sax"
     ],
     "regex_patterns": [
       "etree\\.XMLParser\\s*\\(",
       "etree\\.fromstring\\s*\\(",
       "etree\\.parse\\s*\\(",
-      "xml\\.etree\\.ElementTree\\.(?:parse|fromstring)\\s*\\(",
       "lxml\\.etree\\.(?:parse|fromstring|XMLParser)\\s*\\(",
-      "yaml\\.load\\s*\\([^)]*\\)(?!.*safe)"
+      "xml\\.etree\\.ElementTree\\.(?:parse|fromstring|iterparse)\\s*\\(",
+      "xml\\.dom\\.minidom\\.(?:parse|parseString)\\s*\\(",
+      "xml\\.sax\\.(?:parse|parseString|make_parser)\\s*\\(",
+      "minidom\\.(?:parse|parseString)\\s*\\(",
+      "load_dtd\\s*=\\s*True",
+      "no_network\\s*=\\s*False",
+      "resolve_entities\\s*=\\s*True"
     ],
-    "confidence": "medium"
+    "confidence": "high"
   },
   "MASS_ASSIGNMENT": {
     "rule_id": "MASS_ASSIGNMENT",
@@ -881,8 +916,8 @@
     "name": "JWT None Algorithm Vulnerability",
     "owasp": "A07",
     "cwe": "CWE-347",
-    "description": "JWT configured to accept 'none' algorithm",
-    "severity": "high",
+    "description": "JWT configured to accept 'none' algorithm allowing signature bypass",
+    "severity": "critical",
     "languages": [
       "python",
       "javascript",
@@ -892,8 +927,10 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "jwt\\.decode\\(.*algorithms.*['\\\"]none['\\\"]",
-      "algorithms\\s*=\\s*\\[[^\\]]*['\\\"]none['\\\"]"
+      "algorithms\\s*=\\s*\\[[^\\]]*['\"]none['\"]",
+      "jwt\\.decode\\s*\\([^)]*['\"]none['\"]",
+      "algorithm\\s*=\\s*['\"]none['\"]",
+      "ALGORITHMS\\s*=\\s*\\[[^\\]]*['\"]none['\"]"
     ],
     "sanitizers": [],
     "confidence": "high"

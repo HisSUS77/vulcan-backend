@@ -305,25 +305,31 @@ class SemanticPipeline:
             result = repo_graph.build()
             graph = result["global_cpg"]
 
+            # Reload queries in case queries.json changed since startup
+            self.query_store.reload()
+
             # Filter source map by selected files if provided
             source_code_map: Dict[str, str] = {}
             allowed = set((p or "").replace("\\", "/") for p in (file_paths or []))
+            repo_root_resolved = Path(repo_path).resolve()
             for module in result["modules"]:
                 file_path = module.file_path
-                rel_path = file_path.replace("\\", "/")
-                if allowed and rel_path not in allowed:
+                # Compute repo-relative path for allowed-set comparison
+                try:
+                    repo_rel = str(Path(file_path).resolve().relative_to(repo_root_resolved))
+                    repo_rel = repo_rel.replace("\\", "/")
+                except Exception:
+                    repo_rel = file_path.replace("\\", "/")
+
+                if allowed and repo_rel not in allowed:
                     continue
                 try:
                     code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                    # Store under multiple keys for flexible lookup
                     source_code_map[file_path] = code
-                    source_code_map[rel_path] = code
-                    # Add repo-relative path for flexible matching
-                    try:
-                        repo_rel = str(Path(file_path).resolve().relative_to(Path(repo_path).resolve()))
-                        repo_rel = repo_rel.replace("\\", "/")
-                        source_code_map[repo_rel] = code
-                    except Exception:
-                        pass
+                    source_code_map[repo_rel] = code
+                    abs_path = str(Path(file_path).resolve())
+                    source_code_map[abs_path] = code
                 except Exception:
                     continue
 
