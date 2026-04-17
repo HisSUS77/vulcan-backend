@@ -24,10 +24,12 @@ class DiffSummary:
 
 
 def normalize_diff_text(diff_text: str) -> str:
-    """Strip markdown fences or surrounding noise and return raw diff."""
+    """Strip markdown fences, DeepSeek <think> blocks, or surrounding noise and return raw diff."""
     if not diff_text:
         return ""
     text = diff_text.strip()
+    # Strip DeepSeek-R1 <think>...</think> reasoning blocks
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     if "```" in text:
         lines = text.splitlines()
         cleaned = []
