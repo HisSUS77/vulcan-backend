@@ -55,13 +55,24 @@ class RepositoryService:
             clone_url = url.replace("https://", f"https://{token}@", 1)
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, clone_url, str(dest_dir)],
-            check=True,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+
+        # Try the requested branch, then fall back to main/master automatically
+        fallback = "master" if branch == "main" else "main"
+        for attempt_branch in [branch, fallback]:
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", "--branch", attempt_branch, clone_url, str(dest_dir)],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if result.returncode == 0:
+                return
+            # Clean up partial clone before retrying
+            if dest_dir.exists():
+                import shutil
+                shutil.rmtree(dest_dir)
+
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stderr)
 
     async def list_repos(self, session: AsyncSession) -> list[Repository]:
         result = await session.execute(select(Repository))
