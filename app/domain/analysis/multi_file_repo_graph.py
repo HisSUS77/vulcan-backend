@@ -1397,9 +1397,11 @@ class MultiFileRepositoryGraph:
     def __init__(
         self,
         repo_path: str,
-        exclude_patterns: Optional[List[str]] = None
+        exclude_patterns: Optional[List[str]] = None,
+        allowed_files: Optional[set] = None,
     ):
         self.repo_path = repo_path
+        self.allowed_files = allowed_files  # repo-relative paths (forward slashes)
         self.scanner = RepositoryScanner(repo_path, exclude_patterns)
         self.symbol_table = GlobalSymbolTable()
         self.cpg_parser = CPGParser()
@@ -1427,6 +1429,12 @@ class MultiFileRepositoryGraph:
         # Step 1: Scan repository
         trace_step("Repo graph step: scanner.scan() (RepositoryScanner)")
         source_files = self.scanner.scan()
+        if self.allowed_files:
+            repo_root = Path(self.repo_path).resolve()
+            source_files = [
+                f for f in source_files
+                if str(f.resolve().relative_to(repo_root)).replace("\\", "/") in self.allowed_files
+            ]
         code_files = [p for p in source_files if not self._is_html_file(p)]
         html_files = [p for p in source_files if self._is_html_file(p)]
         print(f"  Found {len(source_files)} source files")

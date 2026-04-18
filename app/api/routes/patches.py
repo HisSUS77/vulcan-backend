@@ -151,6 +151,25 @@ async def reject_patch(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
+@router.post("/{patch_id}/verify")
+async def verify_patch(
+    patch_id: str,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """
+    Re-scan the patched code to confirm the vulnerability is actually fixed.
+    Returns: {fixed, original_vuln_type, remaining_vulns, new_vulns, verified_at}
+    """
+    orchestrator = PatchOrchestrator(db)
+    try:
+        return await orchestrator.verify(patch_id, user_id=user["id"])
+    except ResourceNotFoundException as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
 @router.get("/vulnerability/{vulnerability_id}/history", response_model=List[PatchHistoryItem])
 async def patch_history(
     vulnerability_id: str,

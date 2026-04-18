@@ -61,7 +61,6 @@
       "['\\\"]SELECT[^'\\\"]*['\\\"\\s]+\\+",
       "execute\\s*\\(\\s*f['\\\"]",
       "cursor\\.execute\\s*\\([^)]*\\+",
-      "cur\\.execute\\s*\\([^)]*[f'\\\"]",
       "cur\\.execute\\s*\\(\\s*f",
       "db\\.execute\\s*\\([^)]*\\+",
       "SELECT.*WHERE.*\\+",
@@ -478,7 +477,7 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)\\b(password|passwd|pwd)\\s*=\\s*['\"][^'\"]{3,}['\"]",
+      "(?i)\\b(password|passwd|pwd)\\s*=\\s*['\"][^'\"{}]{3,}['\"]",
       "(?i)\\b(secret_?key|app_?secret|flask_?secret)\\s*=\\s*['\"][^'\"]{4,}['\"]",
       "(?i)\\b(jwt_?secret|jwt_?key)\\s*=\\s*['\"][^'\"]{4,}['\"]",
       "(?i)\\b(db_?password|database_?password|db_?pass)\\s*=\\s*['\"][^'\"]{3,}['\"]",
@@ -1061,7 +1060,7 @@
     "confidence": "low",
     "regex_patterns": [
       "(?:logging|logger)\\.(info|debug|warning|error|critical)\\s*\\(",
-      "print\\s*\\(",
+      "(?<![a-zA-Z_.])print\\s*\\(",
       "console\\.(log|error|warn)\\s*\\("
     ]
   },
@@ -1365,7 +1364,7 @@
     "regex_patterns": [
       "jsonify\\s*\\([^)]*(?:password|token|secret|key)",
       "json\\.dumps\\s*\\([^)]*(?:password|token|secret|key)",
-      "(?:password|secret|token|api_key)\\s*['\\\"][^'\\\"]*['\\\"]"
+      "(?:password|secret|token|api_key)\\s*=\\s*['\\\"][^'\\\"{}]{4,}['\\\"]"
     ]
   },
   "CLICKJACKING_NO_HEADER": {

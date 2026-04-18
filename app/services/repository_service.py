@@ -25,6 +25,11 @@ class RepositoryService:
             ".ts": "typescript",
             ".tsx": "typescript",
             ".jsx": "javascript",
+            ".java": "java",
+            ".php": "php",
+            ".rb": "ruby",
+            ".go": "go",
+            ".cs": "csharp",
         }.get(ext)
 
     def _collect_source_files(self, root: Path) -> list[Path]:
@@ -67,10 +72,15 @@ class RepositoryService:
             )
             if result.returncode == 0:
                 return
-            # Clean up partial clone before retrying
+            # Clean up partial clone before retrying (use rmdir /s /q on Windows to avoid lock issues)
             if dest_dir.exists():
-                import shutil
-                shutil.rmtree(dest_dir)
+                try:
+                    shutil.rmtree(dest_dir, ignore_errors=False)
+                except Exception:
+                    subprocess.run(
+                        ["cmd", "/c", "rmdir", "/s", "/q", str(dest_dir)],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    )
 
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stderr)
 
@@ -103,8 +113,24 @@ class RepositoryService:
         await session.commit()
 
     async def branches(self, session: AsyncSession, repo_id: int) -> list[str]:
-        await self.get(session, repo_id)
-        return ["main", "develop", "feature/demo"]
+        repo = await self.get(session, repo_id)
+        if repo.url:
+            try:
+                result = subprocess.run(
+                    ["git", "ls-remote", "--heads", repo.url],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                )
+                if result.returncode == 0:
+                    branches = []
+                    for line in result.stdout.decode(errors="replace").splitlines():
+                        if "\trefs/heads/" in line:
+                            branches.append(line.split("\trefs/heads/")[-1].strip())
+                    if branches:
+                        return branches
+            except Exception:
+                pass
+        return ["main", "master", "develop"]
 
     async def list_files(self, session: AsyncSession, repo_id: int, branch: str) -> list[str]:
         repo = await self.get(session, repo_id)

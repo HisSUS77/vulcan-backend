@@ -16,6 +16,30 @@ from semantic_engine.classifier.llm_service import (
 
 logger = logging.getLogger(__name__)
 
+# Rules whose presence alone is sufficient evidence — LLM cannot make them "safe".
+# Taint-flow rules (SQL injection, SSRF, path traversal, etc.) are NOT here;
+# those still benefit from LLM false-positive filtering.
+_PRESENCE_VULN_RULES = {
+    "INSECURE_DESERIALIZATION",
+    "WEAK_CRYPTO",
+    "USE_OF_HARD_CODED_IV",
+    "DEBUG_MODE_ENABLED",
+    "DISABLED_CERTIFICATE_VALIDATION",
+    "JWT_NONE_ALGORITHM",
+    "JWT_WEAK_SECRET",
+    "HARDCODED_SECRETS",
+    "LOGGING_DISABLED",
+    "AWS_METADATA_ACCESS",
+    "GCP_METADATA_ACCESS",
+    "AZURE_METADATA_ACCESS",
+    "IMDS_TOKENLESS",
+    "A06_NPM_RESOLVED_HTTP",
+    "A06_NPM_REGISTRY_HTTP",
+    "A06_PYTHON_VCS_DEP",
+    "A06_PIPFILE_VCS",
+    "VULNERABLE_COMPONENTS",
+}
+
 
 @dataclass
 class ClassifiedVulnerability:
@@ -80,20 +104,61 @@ class SliceClassifier:
     ) -> List[ClassifiedVulnerability]:
         """
         Classify multiple code slices.
-        
+
         Args:
             slices: List of code slices from query executor
-        
+
         Returns:
             List of classified vulnerabilities
         """
+        import os
+
+        # Reset soft (scraping/rate) exhaustions at the start of each scan batch
+        # so GitHub Models are retried even if a prior scan got scraping-blocked.
+        if self.llm_service and hasattr(self.llm_service, '_pool'):
+            self.llm_service._pool.reset_soft_exhausted()
+
+        # Cap LLM calls per scan to conserve free-tier quota.
+        # Presence-rule slices bypass LLM anyway; this cap only affects taint-flow slices.
+        # Slices beyond the cap are treated as LIKELY_VULNERABLE (same as LLM unavailable).
+        max_llm_calls = int(os.getenv("MAX_LLM_DETECTION_CALLS", "20"))
+
+        _conf_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+
+        def _needs_llm(s: "CodeSlice") -> bool:
+            return not (s.pattern_type == "REGEX" and s.rule_id in _PRESENCE_VULN_RULES)
+
+        llm_budget = max_llm_calls
         classified = []
-        
-        for slice_obj in slices:
+
+        # Sort slices so high-confidence taint-flow slices consume the LLM budget first
+        sorted_slices = sorted(
+            slices,
+            key=lambda s: _conf_rank.get((s.confidence or "").lower(), 0),
+            reverse=True,
+        )
+
+        for slice_obj in sorted_slices:
+            if _needs_llm(slice_obj):
+                if llm_budget > 0:
+                    llm_budget -= 1
+                else:
+                    # Budget exhausted — skip LLM, use static fallback directly
+                    result = self._fallback_classify(slice_obj)
+                    if result:
+                        classified.append(result)
+                    continue
+
             result = await self.classify_slice(slice_obj)
             if result:
                 classified.append(result)
-        
+
+        llm_used = max_llm_calls - llm_budget
+        logger.info(
+            f"Classified {len(classified)} vulnerabilities "
+            f"(LLM used: {llm_used}/{max_llm_calls}, slices total: {len(slices)})"
+        )
+
         # Sort by final severity and confidence
         classified.sort(
             key=lambda v: (
@@ -101,9 +166,40 @@ class SliceClassifier:
                 -v.final_confidence
             )
         )
-        
-        logger.info(f"Classified {len(classified)} vulnerabilities")
+
         return classified
+
+    def _fallback_classify(self, slice_obj: "CodeSlice") -> Optional["ClassifiedVulnerability"]:
+        """Fast path for slices beyond the LLM cap — static result only."""
+        llm_result = self._get_static_only_result(slice_obj)
+        final_severity, final_confidence, is_vulnerable = self._combine_results(slice_obj, llm_result)
+        if not is_vulnerable:
+            return None
+        return ClassifiedVulnerability(
+            slice_id=slice_obj.slice_id,
+            rule_id=slice_obj.rule_id,
+            rule_name=slice_obj.rule_name,
+            owasp=slice_obj.owasp,
+            cwe=slice_obj.cwe,
+            code_snippet=slice_obj.code_snippet,
+            location=slice_obj.location,
+            source_label=slice_obj.source_label,
+            sink_label=slice_obj.sink_label,
+            path_nodes=slice_obj.path_nodes,
+            static_severity=slice_obj.severity,
+            static_confidence=slice_obj.confidence,
+            pattern_type=slice_obj.pattern_type,
+            static_reason=slice_obj.reason,
+            llm_classification=llm_result.classification,
+            llm_explanation="LLM cap reached — static analysis only",
+            llm_severity=llm_result.severity,
+            llm_exploitability=llm_result.exploitability_score,
+            llm_remediation=llm_result.remediation,
+            llm_confidence=llm_result.confidence,
+            final_severity=final_severity,
+            final_confidence=final_confidence,
+            is_vulnerable=is_vulnerable,
+        )
     
     async def classify_slice(
         self, slice_obj: CodeSlice
@@ -117,38 +213,6 @@ class SliceClassifier:
         Returns:
             ClassifiedVulnerability or None if filtered out
         """
-        # "Presence" vulnerabilities: dangerous by definition regardless of
-        # whether user input is visible in the snippet.  The LLM cannot make
-        # these "safe" — it only rejects them because regex matches give
-        # source="regex" / sink="regex" with no taint context.
-        # Do NOT include taint-flow rules here (SQL, SSRF, path traversal, etc.)
-        # — those still benefit from LLM false-positive filtering.
-        _PRESENCE_VULN_RULES = {
-            # Insecure APIs — dangerous regardless of inputs
-            "INSECURE_DESERIALIZATION",   # pickle.loads is always unsafe
-            "WEAK_CRYPTO",                # md5/sha1 always cryptographically weak
-            "USE_OF_HARD_CODED_IV",       # hardcoded IV always wrong
-            # Configuration issues — presence = vulnerability
-            "DEBUG_MODE_ENABLED",
-            "DISABLED_CERTIFICATE_VALIDATION",  # verify=False always wrong
-            "JWT_NONE_ALGORITHM",               # algorithms=["none"] always wrong
-            "JWT_WEAK_SECRET",
-            "HARDCODED_SECRETS",
-            # Logging / observability
-            "LOGGING_DISABLED",
-            # Cloud SSRF sinks — direct IP/hostname is always a finding
-            "AWS_METADATA_ACCESS",
-            "GCP_METADATA_ACCESS",
-            "AZURE_METADATA_ACCESS",
-            "IMDS_TOKENLESS",
-            # Supply-chain / dependency manifest rules (config files)
-            "A06_NPM_RESOLVED_HTTP",
-            "A06_NPM_REGISTRY_HTTP",
-            "A06_PYTHON_VCS_DEP",
-            "A06_PIPFILE_VCS",
-            "VULNERABLE_COMPONENTS",
-        }
-
         if slice_obj.pattern_type == "REGEX" and slice_obj.rule_id in _PRESENCE_VULN_RULES:
             llm_result = self._get_static_only_result(slice_obj)
         elif self.enable_llm and self.llm_service:

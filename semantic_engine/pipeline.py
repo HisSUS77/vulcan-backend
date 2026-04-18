@@ -1,8 +1,9 @@
 """
 Semantic Analysis Pipeline - End-to-End Vulnerability Detection
-Orchestrates: AST → CFG → DFG → Unified CPG → Query Execution → LLM Classification
+Orchestrates: AST → CFG → DFG → Unified CPG → Query Execution → LLM Classification → Exploit PoC
 Production-grade security scanning with guardrails and error handling.
 """
+import asyncio
 import os
 import time
 import logging
@@ -172,13 +173,15 @@ class SemanticPipeline:
             vulnerabilities = await self._classify_slices(all_slices)
             vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
             logger.info(f"Classification: {len(vulnerabilities)} vulnerabilities confirmed")
-            
-            # Step 5: Build result
+
+            # Step 5: Enrich HIGH/CRITICAL confirmed vulns with PoC exploits (parallel)
+            formatted_vulns = [self._format_vulnerability(v) for v in vulnerabilities]
+            formatted_vulns = await self._enrich_with_exploits(formatted_vulns)
+
+            # Step 6: Build result
             analysis_time = time.time() - start_time
-            
-            # Serialize graph for visualization
-            graph_data = self._serialize_graph(graph)
-            
+            graph_data    = self._serialize_graph(graph)
+
             result = AnalysisResult(
                 filename=filename,
                 language=language,
@@ -189,7 +192,7 @@ class SemanticPipeline:
                 rules_executed=len(self.query_store.get_all_queries()),
                 slices_found=len(all_slices),
                 vulnerabilities_found=len(vulnerabilities),
-                vulnerabilities=[self._format_vulnerability(v) for v in vulnerabilities],
+                vulnerabilities=formatted_vulns,
                 graph_data=graph_data,
                 warnings=warnings,
                 errors=errors,
@@ -301,7 +304,11 @@ class SemanticPipeline:
         try:
             from app.domain.analysis.multi_file_repo_graph import MultiFileRepositoryGraph
             trace_step("Repo graph: MultiFileRepositoryGraph.build()")
-            repo_graph = MultiFileRepositoryGraph(repo_path)
+            allowed = set((p or "").replace("\\", "/") for p in (file_paths or []))
+            repo_graph = MultiFileRepositoryGraph(
+                repo_path,
+                allowed_files=allowed if allowed else None,
+            )
             result = repo_graph.build()
             graph = result["global_cpg"]
 
@@ -310,7 +317,6 @@ class SemanticPipeline:
 
             # Filter source map by selected files if provided
             source_code_map: Dict[str, str] = {}
-            allowed = set((p or "").replace("\\", "/") for p in (file_paths or []))
             repo_root_resolved = Path(repo_path).resolve()
             for module in result["modules"]:
                 file_path = module.file_path
@@ -355,9 +361,13 @@ class SemanticPipeline:
             trace_step("Pipeline step: _classify_slices() [repo]")
             vulnerabilities = await self._classify_slices(all_slices)
             vulnerabilities = self._dedupe_vulnerabilities(vulnerabilities)
-            analysis_time = time.time() - start_time
 
-            graph_data = self._serialize_graph(graph)
+            # Enrich HIGH/CRITICAL confirmed vulns with PoC exploits (parallel)
+            formatted_vulns = [self._format_vulnerability(v) for v in vulnerabilities]
+            formatted_vulns = await self._enrich_with_exploits(formatted_vulns)
+
+            analysis_time = time.time() - start_time
+            graph_data    = self._serialize_graph(graph)
             return AnalysisResult(
                 filename="repository",
                 language="multi",
@@ -368,7 +378,7 @@ class SemanticPipeline:
                 rules_executed=len(self.query_store.get_all_queries()),
                 slices_found=len(all_slices),
                 vulnerabilities_found=len(vulnerabilities),
-                vulnerabilities=[self._format_vulnerability(v) for v in vulnerabilities],
+                vulnerabilities=formatted_vulns,
                 graph_data=graph_data,
                 warnings=warnings,
                 errors=errors,
@@ -613,6 +623,61 @@ class SemanticPipeline:
             "edges": edges
         }
     
+    async def _enrich_with_exploits(self, formatted_vulns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Attach PoC exploit data to HIGH/CRITICAL VULNERABLE findings.
+        Processed sequentially — the LLM pool is rate-limited so concurrent
+        calls just pile up on the throttle lock and cause repeated retries.
+        Non-blocking: any failure leaves the finding unchanged.
+        """
+        try:
+            from semantic_engine.classifier.exploit_llm_service import get_exploit_service
+            exploit_svc = get_exploit_service()
+            if not exploit_svc.is_available:
+                return formatted_vulns
+
+            eligible: list[int] = []
+            for i, fmt in enumerate(formatted_vulns):
+                sev     = (fmt.get("severity") or "").lower()
+                llm_cls = fmt.get("analysis", {}).get("llm_classification", {}).get("classification", "")
+                if sev in ("high", "critical") and llm_cls in ("VULNERABLE", "LIKELY_VULNERABLE"):
+                    eligible.append(i)
+
+            if not eligible:
+                return formatted_vulns
+
+            # Cap at 5 findings to bound total exploit-generation time
+            eligible = eligible[:5]
+            logger.info(f"Generating PoC exploits for {len(eligible)} HIGH/CRITICAL finding(s) (sequential)...")
+            for i in eligible:
+                fmt = formatted_vulns[i]
+                try:
+                    result = await exploit_svc.generate_exploit(
+                        code_snippet=fmt.get("evidence", {}).get("code_snippet", "") or "",
+                        vuln_type=fmt.get("type", "Unknown"),
+                        cwe=fmt.get("cwe"),
+                        owasp=fmt.get("owasp"),
+                        severity=(fmt.get("severity") or "").lower(),
+                        file_path=fmt.get("location", {}).get("file", ""),
+                    )
+                    if result is not None:
+                        formatted_vulns[i]["exploit"] = {
+                            "exploitable":   result.exploitable,
+                            "exploit_type":  result.exploit_type,
+                            "attack_vector": result.attack_vector,
+                            "poc_code":      result.poc_code,
+                            "impact":        result.impact,
+                            "bypass_hints":  result.bypass_hints,
+                            "confidence":    round(result.confidence, 2),
+                        }
+                except Exception as exc:
+                    logger.warning(f"Exploit generation failed for finding {i} (skipping): {exc}")
+
+        except Exception as exc:
+            logger.warning(f"Exploit enrichment failed (non-blocking): {exc}")
+
+        return formatted_vulns
+
     def _format_vulnerability(self, vuln: ClassifiedVulnerability) -> Dict[str, Any]:
         """
         Format vulnerability for API response.

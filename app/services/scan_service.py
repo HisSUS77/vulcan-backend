@@ -353,11 +353,25 @@ class ScanService:
                 await self._append_logs(scan_id, ["[INFO] Building semantic graph..."])
                 pipeline = get_pipeline(PipelineConfig(enable_llm=True))
                 trace_step("SemanticPipeline: analyze_code()")
-                result = await pipeline.analyze_code(
-                    filename=filename,
-                    code=code,
-                    language=language,
-                )
+                scan_timeout = int(os.getenv("SCAN_TIMEOUT_SECONDS", "300"))
+                try:
+                    result = await asyncio.wait_for(
+                        pipeline.analyze_code(filename=filename, code=code, language=language),
+                        timeout=scan_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"[scan:{scan_id}] analyze_code timed out after {scan_timeout}s")
+                    from semantic_engine.pipeline import AnalysisResult
+                    result = AnalysisResult(
+                        filename=filename, language=language,
+                        lines_of_code=len(code.split('\n')),
+                        analysis_time_seconds=float(scan_timeout),
+                        graph_nodes=0, graph_edges=0, rules_executed=0,
+                        slices_found=0, vulnerabilities_found=0,
+                        vulnerabilities=[], graph_data=None,
+                        warnings=["Scan timed out — partial results only"],
+                        errors=[], success=False,
+                    )
 
                 vulnerabilities = self._dedupe_vulnerabilities(None, result.vulnerabilities)
                 by_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
@@ -505,10 +519,27 @@ class ScanService:
             # Repository-level analysis (multi-file, interprocedural)
             pipeline = get_pipeline(PipelineConfig(enable_llm=True))
             trace_step("SemanticPipeline: analyze_repository()")
-            repo_result = await pipeline.analyze_repository(
-                repo_path=str(repo_root),
-                file_paths=[str(p.relative_to(repo_root)).replace("\\", "/") for p in files],
-            )
+            scan_timeout = int(os.getenv("SCAN_TIMEOUT_SECONDS", "300"))
+            try:
+                repo_result = await asyncio.wait_for(
+                    pipeline.analyze_repository(
+                        repo_path=str(repo_root),
+                        file_paths=[str(p.relative_to(repo_root)).replace("\\", "/") for p in files],
+                    ),
+                    timeout=scan_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"[scan:{scan_id}] analyze_repository timed out after {scan_timeout}s — completing with partial results")
+                from semantic_engine.pipeline import AnalysisResult
+                repo_result = AnalysisResult(
+                    filename="repository", language="multi",
+                    lines_of_code=0, analysis_time_seconds=float(scan_timeout),
+                    graph_nodes=0, graph_edges=0, rules_executed=0,
+                    slices_found=0, vulnerabilities_found=0,
+                    vulnerabilities=[], graph_data=None,
+                    warnings=["Scan timed out — partial results only"],
+                    errors=[], success=False,
+                )
 
             rel_paths = [str(p.relative_to(repo_root)).replace("\\", "/") for p in files]
             vulnerabilities: list[dict] = self._dedupe_vulnerabilities(

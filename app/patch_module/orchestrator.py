@@ -308,6 +308,100 @@ class PatchOrchestrator:
             review_status="rejected",
         )
 
+    async def verify(self, patch_id: str, user_id: str) -> dict:
+        """
+        Re-scan the patched code to confirm the vulnerability is actually fixed.
+        Applies the unified diff to the original vulnerable slice, then runs
+        the semantic pipeline on the result.
+        """
+        patch = await self.repo.get_patch(patch_id)
+        if not patch:
+            raise ResourceNotFoundException("Patch not found")
+
+        original_code = patch.get("vulnerable_slice", "")
+        unified_diff  = patch.get("unified_diff", "")
+        vuln_type     = patch.get("vuln_type", "")
+        language      = patch.get("language", "python")
+        file_path     = patch.get("file_path", "patched_file.py")
+
+        patched_code = self._apply_diff_to_code(original_code, unified_diff)
+
+        try:
+            from semantic_engine.pipeline import get_pipeline
+            pipeline = get_pipeline()
+            result = await pipeline.analyze_code(
+                filename=file_path,
+                code=patched_code,
+                language=language,
+            )
+            remaining = [
+                v for v in result.vulnerabilities
+                if vuln_type.lower() in (v.get("type") or "").lower()
+            ]
+            new_vulns = [
+                v for v in result.vulnerabilities
+                if vuln_type.lower() not in (v.get("type") or "").lower()
+            ]
+            fixed = len(remaining) == 0
+        except Exception as exc:
+            logger.warning(f"Verify re-scan failed: {exc}")
+            fixed = None
+            remaining = []
+            new_vulns = []
+
+        verified_at = datetime.utcnow().isoformat()
+        await self.repo.update_patch(patch_id, {
+            "verification": {
+                "fixed":       fixed,
+                "verified_at": verified_at,
+                "remaining":   len(remaining),
+                "new_vulns":   len(new_vulns),
+            }
+        })
+
+        return {
+            "patch_id":          patch_id,
+            "fixed":             fixed,
+            "original_vuln_type": vuln_type,
+            "remaining_vulns":   remaining,
+            "new_vulns":         new_vulns,
+            "patched_code_lines": len(patched_code.splitlines()),
+            "verified_at":       verified_at,
+        }
+
+    @staticmethod
+    def _apply_diff_to_code(original: str, unified_diff: str) -> str:
+        """
+        Apply a unified diff to the original code string.
+        Falls back to original if the diff cannot be applied cleanly.
+        """
+        if not unified_diff or not original:
+            return original
+        try:
+            import re
+            lines = original.splitlines(keepends=True)
+            result_lines = list(lines)
+            hunks = re.findall(
+                r"@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@[^\n]*\n(.*?)(?=\n@@|\Z)",
+                unified_diff, re.DOTALL
+            )
+            offset = 0
+            for src_start, _, hunk_body in hunks:
+                src_idx = int(src_start) - 1 + offset
+                removes, adds = [], []
+                for line in hunk_body.splitlines():
+                    if line.startswith("-"):
+                        removes.append(line[1:] + "\n")
+                    elif line.startswith("+"):
+                        adds.append(line[1:] + "\n")
+                # Replace removed lines with added lines at src_idx
+                end = src_idx + len(removes)
+                result_lines[src_idx:end] = adds
+                offset += len(adds) - len(removes)
+            return "".join(result_lines)
+        except Exception:
+            return original
+
     async def list_for_vulnerability(self, vulnerability_id: str) -> List[PatchHistoryItem]:
         """FE-5: Return historical patch records for audit and traceability."""
         patches = await self.repo.list_by_vulnerability_ids([vulnerability_id])

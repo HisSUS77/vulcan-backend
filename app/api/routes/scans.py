@@ -86,6 +86,59 @@ async def start_scan(
         )
 
 
+@router.get("/diff-files")
+async def get_diff_files(
+    repo_id: int,
+    base: str = "main",
+    head: str = "HEAD",
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    session: AsyncSession = Depends(get_db),
+):
+    """
+    Return list of source files changed between two git refs.
+    Use these as file_paths in a diff-based scan (much faster than full scan).
+    """
+    import subprocess, tempfile, shutil
+    from pathlib import Path
+    from app.services.repository_service import RepositoryService
+
+    repo_svc = RepositoryService()
+    repo = await repo_svc.get(session, repo_id)
+    if not repo or not repo.url:
+        raise HTTPException(status_code=404, detail="Repository not found or has no URL")
+
+    tmp = Path(tempfile.mkdtemp(prefix="vulcan-diff-"))
+    try:
+        # Shallow clone to get diff
+        clone_url = repo.url
+        if repo.access_token and clone_url.startswith("https://"):
+            clone_url = clone_url.replace("https://", f"https://{repo.access_token}@", 1)
+
+        subprocess.run(
+            ["git", "clone", "--depth", "50", clone_url, str(tmp / "repo")],
+            check=True, capture_output=True, timeout=60
+        )
+        repo_dir = tmp / "repo"
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...{head}"],
+            cwd=str(repo_dir), capture_output=True, text=True, timeout=30
+        )
+        all_changed = [f.strip() for f in result.stdout.splitlines() if f.strip()]
+
+        # Filter to source files only
+        source_exts = {".py", ".js", ".ts", ".tsx", ".jsx"}
+        changed = [f for f in all_changed if Path(f).suffix.lower() in source_exts]
+
+        return {"base": base, "head": head, "changed_files": changed, "total": len(changed)}
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=400, detail=f"Git operation failed: {exc.stderr.decode()[:200]}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 @router.get("/{scan_id}/status", response_model=ScanStatusRead)
 async def scan_status(
     scan_id: str,

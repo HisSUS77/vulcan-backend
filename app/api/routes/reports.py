@@ -101,6 +101,47 @@ async def export_report(
         )
 
 
+@router.get("/{scan_id}/compliance")
+async def get_compliance_report(
+    scan_id: str,
+    framework: str = "owasp",
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """
+    Get compliance mapping for a scan.
+    framework: owasp | pci-dss | soc2
+    """
+    from app.services.compliance_service import ComplianceService
+    svc = ComplianceService(db)
+    data = await svc.get_compliance_data(scan_id, framework, user)
+    if not data:
+        raise HTTPException(status_code=404, detail="Scan not found or unsupported framework")
+    return data
+
+
+@router.get("/{scan_id}/compliance/pdf")
+async def export_compliance_pdf(
+    scan_id: str,
+    framework: str = "owasp",
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """Export compliance report as PDF."""
+    from app.services.compliance_service import ComplianceService
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+    svc = ComplianceService(db)
+    pdf = await svc.export_compliance_pdf(scan_id, framework, user)
+    if not pdf:
+        raise HTTPException(status_code=404, detail="Report not found or PDF generation failed")
+    return StreamingResponse(
+        BytesIO(pdf),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=compliance-{framework}-{scan_id}.pdf"}
+    )
+
+
 @router.post("/compare")
 async def compare_reports(
     payload: dict,
