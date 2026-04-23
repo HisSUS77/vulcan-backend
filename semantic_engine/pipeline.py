@@ -221,9 +221,10 @@ class SemanticPipeline:
             SemanticGraph or None on failure
         """
         try:
-            if language.lower() not in ['python', 'py']:
+            _SUPPORTED = {'python', 'py', 'javascript', 'js', 'jsx', 'typescript', 'ts', 'tsx'}
+            if language.lower() not in _SUPPORTED:
                 logger.warning(f"Unsupported language: {language}, using Python parser")
-            
+
             # Build semantic graph using existing components
             builder = SemanticGraphBuilder(language=language)
             graph = builder.build(code, filename="input")
@@ -237,7 +238,7 @@ class SemanticPipeline:
             if self.config.enable_cycle_detection:
                 has_cycles = self._detect_cycles(graph)
                 if has_cycles:
-                    logger.warning("Cycles detected in graph (may affect path finding)")
+                    logger.debug("Cycles detected in graph (may affect path finding)")
             
             return graph
         

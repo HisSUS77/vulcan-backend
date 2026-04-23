@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from enum import Enum
 from pathlib import Path
 from typing import Dict, Optional
@@ -24,6 +25,19 @@ from pydantic import BaseModel
 from semantic_engine.classifier.llm_pool import RoleAwareLLMPool
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_json_loads(text: str) -> dict:
+    """Parse JSON tolerantly, stripping invalid backslash escapes from LLM output."""
+    try:
+        return json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        cleaned = re.sub(
+            r'\\([^"\\bfnrtu/\n\r])',
+            lambda m: '\\\\' + m.group(1),
+            text,
+        )
+        return json.loads(cleaned, strict=False)
 
 
 class Classification(str, Enum):
@@ -175,7 +189,7 @@ class LLMService:
             if start < 0 or end <= start:
                 raise ValueError("No JSON in response")
 
-            data = json.loads(response[start:end], strict=False)
+            data = _safe_json_loads(response[start:end])
 
             # Vulcan-LLM format (has "vulnerable" field)
             if "vulnerable" in data:

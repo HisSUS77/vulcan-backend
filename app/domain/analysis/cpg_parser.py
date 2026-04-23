@@ -135,41 +135,25 @@ class CPGParser:
         return default_path
     
     def _load_languages(self):
-        """Load language grammars (JS/TS/Python)"""
-        for lang in [LanguageType.JAVASCRIPT, LanguageType.TYPESCRIPT, LanguageType.PYTHON]:
+        """Load language grammars using tree-sitter 0.22+ package API."""
+        import tree_sitter_python as _tspy
+        import tree_sitter_javascript as _tsjs
+        import tree_sitter_typescript as _tsts
+
+        lang_capsules = {
+            LanguageType.PYTHON:     _tspy.language(),
+            LanguageType.JAVASCRIPT: _tsjs.language(),
+            LanguageType.TYPESCRIPT: _tsts.language_typescript(),
+        }
+
+        for lang, capsule in lang_capsules.items():
             try:
-                so_file = self.grammar_path / f"{lang.value}.so"
-                dll_file = self.grammar_path / f"{lang.value}.dll"
-                
-                # Check for .so or .dll (Windows)
-                grammar_file = so_file if so_file.exists() else dll_file if dll_file.exists() else None
-                
-                if not grammar_file:
-                    logger.warning(f"Grammar not found: {so_file} or {dll_file}")
-                    continue
-                
-                language = Language(str(grammar_file), lang.value)
+                language = Language(capsule)
                 self.languages[lang] = language
-                
-                parser = Parser()
-                parser.set_language(language)
-                self.parsers[lang] = parser
-                
+                self.parsers[lang] = Parser(language)
                 logger.info(f"Loaded {lang.value} grammar")
             except Exception as e:
                 logger.error(f"Failed to load {lang.value}: {e}")
-
-        # Prefer tree_sitter_languages for Python if available (more reliable on Windows)
-        try:
-            from tree_sitter_languages import get_language
-            py_lang = get_language("python")
-            py_parser = Parser()
-            py_parser.set_language(py_lang)
-            self.languages[LanguageType.PYTHON] = py_lang
-            self.parsers[LanguageType.PYTHON] = py_parser
-            logger.info("Loaded python grammar via tree_sitter_languages")
-        except Exception:
-            pass
 
     def _normalize_language(self, language: LanguageType | str) -> Optional[LanguageType]:
         """Normalize language input to LanguageType enum."""

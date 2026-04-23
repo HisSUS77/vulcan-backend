@@ -329,6 +329,11 @@ class RoleAwareLLMPool:
     def is_available(self) -> bool:
         return any(p["id"] not in self._exhausted for p in self._providers)
 
+    @property
+    def current_model(self) -> str:
+        """Return the id of the last successful provider, or 'unknown'."""
+        return self._sticky["id"] if self._sticky else "unknown"
+
     def status(self) -> dict:
         """Return pool status — useful for /dashboard/llm-status endpoint."""
         return {

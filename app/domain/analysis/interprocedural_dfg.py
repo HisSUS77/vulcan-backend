@@ -15,6 +15,7 @@ Integration:
 - Supports Python and JavaScript
 """
 
+import logging
 from typing import Dict, List, Set, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,6 +24,8 @@ from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
 from app.core.trace import trace_step
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class DFGEdgeType(str, Enum):
@@ -180,7 +183,7 @@ class InterproceduralDFG:
         Returns:
             Enhanced CPG with DFG edges
         """
-        print("Building Interprocedural DFG...")
+        logger.debug("Building Interprocedural DFG...")
         
         # Step 1: Extract function signatures
         self._extract_functions()
@@ -205,7 +208,7 @@ class InterproceduralDFG:
         # Step 6: Add uncertainty annotations
         self._annotate_uncertainty()
         
-        print(f"Built DFG with {len(self.dfg_edges)} interprocedural edges")
+        logger.debug("Built DFG with %d interprocedural edges", len(self.dfg_edges))
         
         return self.get_cpg()
 
@@ -295,7 +298,7 @@ class InterproceduralDFG:
                     self.functions[node.name] = signature
                 self.functions[node.id] = signature
                 
-        print(f"  Extracted {len(self.functions)} function signatures")
+        logger.debug("  Extracted %d function signatures", len(self.functions))
     
     def _extract_call_sites(self):
         """Extract all function call sites"""
@@ -326,7 +329,7 @@ class InterproceduralDFG:
                 
                 self.call_sites.append(call_site)
         
-        print(f"  Found {len(self.call_sites)} call sites")
+        logger.debug("  Found %d call sites", len(self.call_sites))
     
     def _build_intraprocedural_dfg(self):
         """Build data flow within each function"""
@@ -669,8 +672,8 @@ class InterproceduralDFG:
         while current:
             # Find parent
             parent_edge = next(
-                (e for e in self.cpg.edges 
-                 if e.to_node == current and e.type == EdgeType.AST_CHILD),
+                (edge for edge in self.cpg.edges
+                 if edge.to_node == current and edge.type == EdgeType.AST_CHILD),
                 None
             )
             

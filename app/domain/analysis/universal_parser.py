@@ -162,42 +162,31 @@ class UniversalParser:
         return default_path
     
     def _load_languages(self):
-        """Load all language grammars"""
-        language_configs = {
-            LanguageType.PYTHON: "python",
-            LanguageType.JAVASCRIPT: "javascript",
-            LanguageType.TYPESCRIPT: "typescript",
-            LanguageType.HTML: "html",
-            LanguageType.JSON: "json",
-            LanguageType.YAML: "yaml",
+        """Load all language grammars using tree-sitter 0.22+ package API."""
+        import tree_sitter_python as _tspy
+        import tree_sitter_javascript as _tsjs
+        import tree_sitter_typescript as _tsts
+        import tree_sitter_html as _tshtml
+        import tree_sitter_json as _tsjson
+        import tree_sitter_yaml as _tsyaml
+
+        lang_capsules = {
+            LanguageType.PYTHON:     _tspy.language(),
+            LanguageType.JAVASCRIPT: _tsjs.language(),
+            LanguageType.TYPESCRIPT: _tsts.language_typescript(),
+            LanguageType.HTML:       _tshtml.language(),
+            LanguageType.JSON:       _tsjson.language(),
+            LanguageType.YAML:       _tsyaml.language(),
         }
-        
-        for lang_type, lang_name in language_configs.items():
+
+        for lang_type, capsule in lang_capsules.items():
             try:
-                # Look for language.so or language.dll (Windows)
-                so_file = self.grammar_path / f"{lang_name}.so"
-                dll_file = self.grammar_path / f"{lang_name}.dll"
-                grammar_file = so_file if so_file.exists() else dll_file if dll_file.exists() else None
-                
-                if not grammar_file:
-                    logger.warning(f"Grammar file not found: {so_file} or {dll_file}")
-                    logger.warning(f"Skipping {lang_name} support")
-                    continue
-                
-                # Load the language
-                language = Language(str(grammar_file), lang_name)
+                language = Language(capsule)
                 self.languages[lang_type] = language
-                
-                # Create parser
-                parser = Parser()
-                parser.set_language(language)
-                self.parsers[lang_type] = parser
-                
-                logger.info(f"Loaded {lang_name} grammar successfully")
-                
+                self.parsers[lang_type] = Parser(language)
+                logger.info(f"Loaded {lang_type.value} grammar successfully")
             except Exception as e:
-                logger.error(f"Failed to load {lang_name} grammar: {e}")
-                logger.error(f"Make sure {lang_name}.so is properly compiled")
+                logger.error(f"Failed to load {lang_type.value} grammar: {e}")
     
     def detect_language(self, filepath: str) -> LanguageType:
         """

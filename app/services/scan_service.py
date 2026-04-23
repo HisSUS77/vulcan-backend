@@ -413,6 +413,16 @@ class ScanService:
                         f"[SUCCESS] Scan completed in {duration:.2f}s",
                     ],
                 )
+
+                # Fire-and-forget oracle confirmation — never blocks scan completion
+                try:
+                    from app.services.confirmation_service import ConfirmationService
+                    asyncio.create_task(
+                        ConfirmationService(self.db).confirm_scan_findings(scan_id, vulnerabilities)
+                    )
+                except Exception as conf_err:
+                    logger.debug("[scan:%s] confirmation task not started: %s", scan_id, conf_err)
+
             finally:
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
@@ -618,9 +628,18 @@ class ScanService:
                         "file_order": file_order,
                         "global": global_graph,
                     },
-                    },
-                    [f"[SUCCESS] Repository scan completed in {duration:.2f}s"],
+                },
+                [f"[SUCCESS] Repository scan completed in {duration:.2f}s"],
+            )
+
+            # Fire-and-forget oracle confirmation — never blocks scan completion
+            try:
+                from app.services.confirmation_service import ConfirmationService
+                asyncio.create_task(
+                    ConfirmationService(self.db).confirm_scan_findings(scan_id, vulnerabilities)
                 )
+            except Exception as conf_err:
+                logger.debug("[scan:%s] confirmation task not started: %s", scan_id, conf_err)
         except Exception as e:
             logger.error(f"Repository scan failed: {e}", exc_info=True)
             await self._update_scan(
