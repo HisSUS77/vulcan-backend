@@ -73,8 +73,11 @@ class BenchmarkService:
         return result.deleted_count > 0
 
     async def seed_if_empty(self, cases: list[dict]) -> int:
-        if await self.db[TC_COLLECTION].count_documents({}) > 0:
+        existing = await self.db[TC_COLLECTION].count_documents({})
+        if existing >= len(cases):
             return 0
+        # Collection is empty or outdated (fewer docs than seed list) — drop and reseed
+        await self.db[TC_COLLECTION].drop()
         docs = [{**c, "created_at": datetime.now(timezone.utc)} for c in cases]
         result = await self.db[TC_COLLECTION].insert_many(docs)
         return len(result.inserted_ids)

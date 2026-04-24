@@ -1,5 +1,6 @@
 """
-Seed dataset: 62 labeled Python/JS test cases covering the top CWEs.
+Seed dataset: 106 labeled Python/JS test cases covering 18 CWEs.
+Sources: manual (55), OWASP Benchmark (23), Juliet Test Suite / NIST SARD (28).
 Each entry: name, code, language, cwe, vuln_type, label, source
 """
 
@@ -790,6 +791,768 @@ SEED_CASES = [
             "  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',\n"
             "  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\n"
             "});\n"
+        ),
+    },
+
+    # =========================================================================
+    # OWASP BENCHMARK SUITE — modelled after BenchmarkTest patterns
+    # https://owasp.org/www-project-benchmark/
+    # =========================================================================
+
+    # ── CWE-330 Weak Randomness (OWASP BenchmarkTest00001 family) ────────────
+    {
+        "name": "[OWASP] WeakRandom: random.random() for token",
+        "language": "python",
+        "cwe": "CWE-330",
+        "vuln_type": "WEAK_RANDOMNESS",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "import random\n"
+            "def generate_token():\n"
+            "    return str(random.random())\n"
+        ),
+    },
+    {
+        "name": "[OWASP] WeakRandom: random.randint session id",
+        "language": "python",
+        "cwe": "CWE-330",
+        "vuln_type": "WEAK_RANDOMNESS",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "import random\n"
+            "def make_session_id():\n"
+            "    return random.randint(0, 999999)\n"
+        ),
+    },
+    {
+        "name": "[OWASP] WeakRandom: secrets.token_hex (safe)",
+        "language": "python",
+        "cwe": "CWE-330",
+        "vuln_type": "WEAK_RANDOMNESS",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "import secrets\n"
+            "def generate_token():\n"
+            "    return secrets.token_hex(32)\n"
+        ),
+    },
+    {
+        "name": "[OWASP] WeakRandom: JS Math.random() for CSRF token",
+        "language": "javascript",
+        "cwe": "CWE-330",
+        "vuln_type": "WEAK_RANDOMNESS",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "function generateCSRFToken() {\n"
+            "  return Math.random().toString(36).substring(2);\n"
+            "}\n"
+        ),
+    },
+    {
+        "name": "[OWASP] WeakRandom: JS crypto.randomBytes (safe)",
+        "language": "javascript",
+        "cwe": "CWE-330",
+        "vuln_type": "WEAK_RANDOMNESS",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "const crypto = require('crypto');\n"
+            "function generateCSRFToken() {\n"
+            "  return crypto.randomBytes(32).toString('hex');\n"
+            "}\n"
+        ),
+    },
+
+    # ── CWE-643 XPath Injection (OWASP BenchmarkTest00170 family) ────────────
+    {
+        "name": "[OWASP] XPathInjection: lxml string interpolation",
+        "language": "python",
+        "cwe": "CWE-643",
+        "vuln_type": "XPATH_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "from lxml import etree\n"
+            "def find_user(tree, username):\n"
+            "    return tree.xpath(f\"//user[name='{username}']\")\n"
+        ),
+    },
+    {
+        "name": "[OWASP] XPathInjection: JS xpath user input",
+        "language": "javascript",
+        "cwe": "CWE-643",
+        "vuln_type": "XPATH_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "const xpath = require('xpath');\n"
+            "function findUser(doc, username) {\n"
+            "  return xpath.select(`//user[name='${username}']`, doc);\n"
+            "}\n"
+        ),
+    },
+    {
+        "name": "[OWASP] XPathInjection: parameterized variable (safe)",
+        "language": "python",
+        "cwe": "CWE-643",
+        "vuln_type": "XPATH_INJECTION",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "from lxml import etree\n"
+            "def find_user(tree, username):\n"
+            "    return tree.xpath('//user[name=$name]', name=username)\n"
+        ),
+    },
+
+    # ── CWE-90 LDAP Injection (OWASP BenchmarkTest00035 family) ──────────────
+    {
+        "name": "[OWASP] LDAPInjection: unsanitized filter",
+        "language": "python",
+        "cwe": "CWE-90",
+        "vuln_type": "LDAP_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "import ldap3\n"
+            "def find_user(conn, username):\n"
+            "    search_filter = f'(uid={username})'\n"
+            "    conn.search('dc=example,dc=com', search_filter)\n"
+            "    return conn.entries\n"
+        ),
+    },
+    {
+        "name": "[OWASP] LDAPInjection: escaped filter (safe)",
+        "language": "python",
+        "cwe": "CWE-90",
+        "vuln_type": "LDAP_INJECTION",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "import ldap3\n"
+            "from ldap3.utils.conv import escape_filter_chars\n"
+            "def find_user(conn, username):\n"
+            "    safe_user = escape_filter_chars(username)\n"
+            "    search_filter = f'(uid={safe_user})'\n"
+            "    conn.search('dc=example,dc=com', search_filter)\n"
+            "    return conn.entries\n"
+        ),
+    },
+
+    # ── CWE-614 Insecure Cookie (OWASP BenchmarkTest00080 family) ────────────
+    {
+        "name": "[OWASP] InsecureCookie: missing Secure flag",
+        "language": "python",
+        "cwe": "CWE-614",
+        "vuln_type": "INSECURE_COOKIE",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "from flask import make_response\n"
+            "def set_session(user_id):\n"
+            "    resp = make_response('OK')\n"
+            "    resp.set_cookie('session', user_id)\n"
+            "    return resp\n"
+        ),
+    },
+    {
+        "name": "[OWASP] InsecureCookie: missing HttpOnly flag",
+        "language": "javascript",
+        "cwe": "CWE-614",
+        "vuln_type": "INSECURE_COOKIE",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "res.cookie('session', token, {\n"
+            "  maxAge: 86400000,\n"
+            "  secure: false\n"
+            "});\n"
+        ),
+    },
+    {
+        "name": "[OWASP] InsecureCookie: secure + httponly (safe)",
+        "language": "python",
+        "cwe": "CWE-614",
+        "vuln_type": "INSECURE_COOKIE",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "from flask import make_response\n"
+            "def set_session(user_id):\n"
+            "    resp = make_response('OK')\n"
+            "    resp.set_cookie('session', user_id, secure=True, httponly=True, samesite='Strict')\n"
+            "    return resp\n"
+        ),
+    },
+
+    # ── CWE-295 Improper Certificate Validation (OWASP) ──────────────────────
+    {
+        "name": "[OWASP] TLSValidation: requests verify=False",
+        "language": "python",
+        "cwe": "CWE-295",
+        "vuln_type": "IMPROPER_TLS_VALIDATION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "import requests\n"
+            "def fetch_data(url):\n"
+            "    return requests.get(url, verify=False).json()\n"
+        ),
+    },
+    {
+        "name": "[OWASP] TLSValidation: JS rejectUnauthorized false",
+        "language": "javascript",
+        "cwe": "CWE-295",
+        "vuln_type": "IMPROPER_TLS_VALIDATION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "const https = require('https');\n"
+            "const agent = new https.Agent({ rejectUnauthorized: false });\n"
+            "fetch('https://api.example.com/data', { agent });\n"
+        ),
+    },
+    {
+        "name": "[OWASP] TLSValidation: default verify (safe)",
+        "language": "python",
+        "cwe": "CWE-295",
+        "vuln_type": "IMPROPER_TLS_VALIDATION",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "import requests\n"
+            "def fetch_data(url):\n"
+            "    return requests.get(url).json()\n"
+        ),
+    },
+
+    # ── CWE-89 SQLi additional OWASP patterns ────────────────────────────────
+    {
+        "name": "[OWASP] SQLi: dynamic ORDER BY clause",
+        "language": "python",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "def list_users(sort_col):\n"
+            "    query = f'SELECT * FROM users ORDER BY {sort_col}'\n"
+            "    return db.execute(query).fetchall()\n"
+        ),
+    },
+    {
+        "name": "[OWASP] SQLi: stored procedure concat",
+        "language": "python",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "def search_products(keyword):\n"
+            "    proc = \"EXEC SearchProducts '\" + keyword + \"'\"\n"
+            "    return db.execute(proc).fetchall()\n"
+        ),
+    },
+    {
+        "name": "[OWASP] SQLi: JS knex raw unsafe",
+        "language": "javascript",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "async function searchUsers(name) {\n"
+            "  return knex.raw(`SELECT * FROM users WHERE name = '${name}'`);\n"
+            "}\n"
+        ),
+    },
+    {
+        "name": "[OWASP] SQLi: knex parameterized (safe)",
+        "language": "javascript",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "async function searchUsers(name) {\n"
+            "  return knex('users').where({ name });\n"
+            "}\n"
+        ),
+    },
+
+    # ── CWE-78 Cmd Injection additional OWASP patterns ────────────────────────
+    {
+        "name": "[OWASP] CmdInjection: Python popen user input",
+        "language": "python",
+        "cwe": "CWE-78",
+        "vuln_type": "COMMAND_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "import os\n"
+            "def convert_image(filename):\n"
+            "    os.popen(f'convert {filename} output.png')\n"
+        ),
+    },
+    {
+        "name": "[OWASP] CmdInjection: shlex.quote protected (safe)",
+        "language": "python",
+        "cwe": "CWE-78",
+        "vuln_type": "COMMAND_INJECTION",
+        "label": "safe",
+        "source": "owasp",
+        "code": (
+            "import subprocess, shlex\n"
+            "def convert_image(filename):\n"
+            "    safe = shlex.quote(filename)\n"
+            "    subprocess.run(f'convert {safe} output.png', shell=True)\n"
+        ),
+    },
+    {
+        "name": "[OWASP] CmdInjection: JS spawn shell=true",
+        "language": "javascript",
+        "cwe": "CWE-78",
+        "vuln_type": "COMMAND_INJECTION",
+        "label": "vulnerable",
+        "source": "owasp",
+        "code": (
+            "const { spawn } = require('child_process');\n"
+            "function compress(file) {\n"
+            "  spawn('gzip ' + file, { shell: true });\n"
+            "}\n"
+        ),
+    },
+
+    # =========================================================================
+    # JULIET TEST SUITE — modelled after NIST SARD Juliet patterns
+    # https://samate.nist.gov/SARD/test-suites/112
+    # =========================================================================
+
+    # ── CWE-89 SQLi (Juliet CWE89_SQL_Injection family) ──────────────────────
+    {
+        "name": "[Juliet] SQLi: getParameter concat (bad)",
+        "language": "python",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from flask import request\n"
+            "def bad():\n"
+            "    data = request.args.get('id')\n"
+            "    query = 'SELECT * FROM users WHERE id=' + data\n"
+            "    cursor.execute(query)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] SQLi: prepared statement (good)",
+        "language": "python",
+        "cwe": "CWE-89",
+        "vuln_type": "SQL_INJECTION",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "from flask import request\n"
+            "def good():\n"
+            "    data = request.args.get('id')\n"
+            "    cursor.execute('SELECT * FROM users WHERE id = ?', (data,))\n"
+        ),
+    },
+
+    # ── CWE-78 OS Command Injection (Juliet CWE78 family) ────────────────────
+    {
+        "name": "[Juliet] CmdInjection: Runtime.exec concat (bad)",
+        "language": "python",
+        "cwe": "CWE-78",
+        "vuln_type": "COMMAND_INJECTION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "import subprocess\n"
+            "from flask import request\n"
+            "def bad():\n"
+            "    cmd = request.args.get('cmd')\n"
+            "    subprocess.call('ls ' + cmd, shell=True)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] CmdInjection: fixed command (good)",
+        "language": "python",
+        "cwe": "CWE-78",
+        "vuln_type": "COMMAND_INJECTION",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "import subprocess\n"
+            "def good():\n"
+            "    subprocess.call(['ls', '-la'], shell=False)\n"
+        ),
+    },
+
+    # ── CWE-22 Path Traversal (Juliet CWE22 family) ──────────────────────────
+    {
+        "name": "[Juliet] PathTraversal: pathlib no validation (bad)",
+        "language": "python",
+        "cwe": "CWE-22",
+        "vuln_type": "PATH_TRAVERSAL",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from pathlib import Path\n"
+            "from flask import request\n"
+            "def bad():\n"
+            "    filename = request.args.get('file')\n"
+            "    return Path('/var/data') / filename\n"
+        ),
+    },
+    {
+        "name": "[Juliet] PathTraversal: resolve + prefix check (good)",
+        "language": "python",
+        "cwe": "CWE-22",
+        "vuln_type": "PATH_TRAVERSAL",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "from pathlib import Path\n"
+            "BASE = Path('/var/data').resolve()\n"
+            "def good(filename):\n"
+            "    target = (BASE / filename).resolve()\n"
+            "    if not str(target).startswith(str(BASE)):\n"
+            "        raise ValueError('Path traversal detected')\n"
+            "    return target.read_text()\n"
+        ),
+    },
+    {
+        "name": "[Juliet] PathTraversal: absolute path from user (bad)",
+        "language": "python",
+        "cwe": "CWE-22",
+        "vuln_type": "PATH_TRAVERSAL",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "import os\n"
+            "from flask import request\n"
+            "def bad():\n"
+            "    filename = request.form['file']\n"
+            "    return open(os.path.join('/uploads', filename)).read()\n"
+        ),
+    },
+
+    # ── CWE-79 XSS (Juliet CWE80_XSS family) ────────────────────────────────
+    {
+        "name": "[Juliet] XSS: Jinja2 autoescape disabled (bad)",
+        "language": "python",
+        "cwe": "CWE-79",
+        "vuln_type": "XSS",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from jinja2 import Environment\n"
+            "env = Environment(autoescape=False)\n"
+            "def bad(user_input):\n"
+            "    tmpl = env.from_string('<p>Hello {{ name }}</p>')\n"
+            "    return tmpl.render(name=user_input)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] XSS: Jinja2 autoescape enabled (good)",
+        "language": "python",
+        "cwe": "CWE-79",
+        "vuln_type": "XSS",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "from jinja2 import Environment\n"
+            "env = Environment(autoescape=True)\n"
+            "def good(user_input):\n"
+            "    tmpl = env.from_string('<p>Hello {{ name }}</p>')\n"
+            "    return tmpl.render(name=user_input)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] XSS: React dangerouslySetInnerHTML (bad)",
+        "language": "javascript",
+        "cwe": "CWE-79",
+        "vuln_type": "XSS",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "function Comment({ userHtml }) {\n"
+            "  return <div dangerouslySetInnerHTML={{ __html: userHtml }} />;\n"
+            "}\n"
+        ),
+    },
+    {
+        "name": "[Juliet] XSS: React safe render (good)",
+        "language": "javascript",
+        "cwe": "CWE-79",
+        "vuln_type": "XSS",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "function Comment({ text }) {\n"
+            "  return <div>{text}</div>;\n"
+            "}\n"
+        ),
+    },
+
+    # ── CWE-327/328 Weak Hash without salt (Juliet) ───────────────────────────
+    {
+        "name": "[Juliet] WeakHash: SHA256 no salt (bad)",
+        "language": "python",
+        "cwe": "CWE-327",
+        "vuln_type": "WEAK_CRYPTOGRAPHY",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "import hashlib\n"
+            "def store_password(password):\n"
+            "    return hashlib.sha256(password.encode()).hexdigest()\n"
+        ),
+    },
+    {
+        "name": "[Juliet] WeakHash: SHA256 with salt (good)",
+        "language": "python",
+        "cwe": "CWE-327",
+        "vuln_type": "WEAK_CRYPTOGRAPHY",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "import hashlib, os\n"
+            "def store_password(password):\n"
+            "    salt = os.urandom(32)\n"
+            "    key = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)\n"
+            "    return salt + key\n"
+        ),
+    },
+    {
+        "name": "[Juliet] WeakCrypto: DES encryption (bad)",
+        "language": "python",
+        "cwe": "CWE-327",
+        "vuln_type": "WEAK_CRYPTOGRAPHY",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from Crypto.Cipher import DES\n"
+            "def encrypt(data, key):\n"
+            "    cipher = DES.new(key, DES.MODE_ECB)\n"
+            "    return cipher.encrypt(data)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] WeakCrypto: AES-GCM (good)",
+        "language": "python",
+        "cwe": "CWE-327",
+        "vuln_type": "WEAK_CRYPTOGRAPHY",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "from Crypto.Cipher import AES\n"
+            "from Crypto.Random import get_random_bytes\n"
+            "def encrypt(data, key):\n"
+            "    nonce = get_random_bytes(16)\n"
+            "    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)\n"
+            "    return nonce + cipher.encrypt(data)\n"
+        ),
+    },
+
+    # ── CWE-502 Deserialization (Juliet) ──────────────────────────────────────
+    {
+        "name": "[Juliet] Deserial: marshal.loads user data (bad)",
+        "language": "python",
+        "cwe": "CWE-502",
+        "vuln_type": "INSECURE_DESERIALIZATION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "import marshal\n"
+            "def load_object(data):\n"
+            "    return marshal.loads(data)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] Deserial: JS node-serialize (bad)",
+        "language": "javascript",
+        "cwe": "CWE-502",
+        "vuln_type": "INSECURE_DESERIALIZATION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "const serialize = require('node-serialize');\n"
+            "function loadProfile(cookie) {\n"
+            "  return serialize.unserialize(cookie);\n"
+            "}\n"
+        ),
+    },
+
+    # ── CWE-94 Code Injection (Juliet) ────────────────────────────────────────
+    {
+        "name": "[Juliet] CodeInjection: exec() user input (bad)",
+        "language": "python",
+        "cwe": "CWE-94",
+        "vuln_type": "CODE_INJECTION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from flask import request\n"
+            "def bad():\n"
+            "    code = request.args.get('expr')\n"
+            "    exec(code)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] CodeInjection: JS eval user input (bad)",
+        "language": "javascript",
+        "cwe": "CWE-94",
+        "vuln_type": "CODE_INJECTION",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "app.get('/calc', (req, res) => {\n"
+            "  const expr = req.query.expr;\n"
+            "  const result = eval(expr);\n"
+            "  res.json({ result });\n"
+            "});\n"
+        ),
+    },
+    {
+        "name": "[Juliet] CodeInjection: ast.literal_eval (good)",
+        "language": "python",
+        "cwe": "CWE-94",
+        "vuln_type": "CODE_INJECTION",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "import ast\n"
+            "from flask import request\n"
+            "def good():\n"
+            "    expr = request.args.get('value')\n"
+            "    return ast.literal_eval(expr)\n"
+        ),
+    },
+
+    # ── CWE-601 Open Redirect additional (Juliet) ─────────────────────────────
+    {
+        "name": "[Juliet] OpenRedirect: header Location injection (bad)",
+        "language": "python",
+        "cwe": "CWE-601",
+        "vuln_type": "OPEN_REDIRECT",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from flask import request, redirect\n"
+            "def bad():\n"
+            "    url = request.form.get('returnUrl')\n"
+            "    return redirect(url)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] OpenRedirect: JS res.redirect user param (bad)",
+        "language": "javascript",
+        "cwe": "CWE-601",
+        "vuln_type": "OPEN_REDIRECT",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "app.get('/logout', (req, res) => {\n"
+            "  const returnUrl = req.query.return;\n"
+            "  res.redirect(returnUrl);\n"
+            "});\n"
+        ),
+    },
+
+    # ── CWE-918 SSRF additional (Juliet) ─────────────────────────────────────
+    {
+        "name": "[Juliet] SSRF: urllib.request user URL (bad)",
+        "language": "python",
+        "cwe": "CWE-918",
+        "vuln_type": "SSRF",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "import urllib.request\n"
+            "from flask import request\n"
+            "def bad():\n"
+            "    url = request.args.get('url')\n"
+            "    return urllib.request.urlopen(url).read()\n"
+        ),
+    },
+    {
+        "name": "[Juliet] SSRF: JS axios with user URL (bad)",
+        "language": "javascript",
+        "cwe": "CWE-918",
+        "vuln_type": "SSRF",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "const axios = require('axios');\n"
+            "async function proxy(req, res) {\n"
+            "  const { url } = req.body;\n"
+            "  const response = await axios.get(url);\n"
+            "  res.json(response.data);\n"
+            "}\n"
+        ),
+    },
+
+    # ── CWE-611 XXE additional (Juliet) ───────────────────────────────────────
+    {
+        "name": "[Juliet] XXE: minidom unsafe parse (bad)",
+        "language": "python",
+        "cwe": "CWE-611",
+        "vuln_type": "XXE",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "from xml.dom import minidom\n"
+            "def parse(xml_data):\n"
+            "    return minidom.parseString(xml_data)\n"
+        ),
+    },
+    {
+        "name": "[Juliet] XXE: expat safe parser (good)",
+        "language": "python",
+        "cwe": "CWE-611",
+        "vuln_type": "XXE",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "import defusedxml.minidom as dxml\n"
+            "def parse(xml_data):\n"
+            "    return dxml.parseString(xml_data)\n"
+        ),
+    },
+
+    # ── CWE-284 IDOR additional (Juliet) ──────────────────────────────────────
+    {
+        "name": "[Juliet] IDOR: JWT sub not verified against resource (bad)",
+        "language": "python",
+        "cwe": "CWE-284",
+        "vuln_type": "IDOR",
+        "label": "vulnerable",
+        "source": "juliet",
+        "code": (
+            "def get_document(doc_id):\n"
+            "    doc = db.documents.find_one({'_id': doc_id})\n"
+            "    return doc\n"
+        ),
+    },
+    {
+        "name": "[Juliet] IDOR: ownership enforced (good)",
+        "language": "python",
+        "cwe": "CWE-284",
+        "vuln_type": "IDOR",
+        "label": "safe",
+        "source": "juliet",
+        "code": (
+            "def get_document(doc_id, current_user_id):\n"
+            "    doc = db.documents.find_one({'_id': doc_id, 'owner_id': current_user_id})\n"
+            "    if not doc:\n"
+            "        raise PermissionError('Not found or access denied')\n"
+            "    return doc\n"
         ),
     },
 ]
