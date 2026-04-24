@@ -1487,6 +1487,9 @@ class MultiFileRepositoryGraph:
         # Step 5b: Link call graph across repository (name-based)
         self._link_call_graph(global_cpg)
 
+        # Step 5b2: Propagate taint through cross-file function arguments
+        self._propagate_cross_file_arg_taint(global_cpg)
+
         # Step 5c: Link route decorators to handlers and auth guards
         self._link_routes_and_guards(global_cpg)
 
@@ -1718,6 +1721,113 @@ class MultiFileRepositoryGraph:
                 graph.edges.append(edge)
                 self.all_edges.append(edge)
                 existing.add(edge_key)
+
+    def _propagate_cross_file_arg_taint(self, graph: SemanticGraph):
+        """
+        Create DFG_PARAM_PASS edges for cross-file function calls.
+
+        _link_call_graph() already resolved CALL_EXPRESSION → FUNCTION edges
+        by name across the repo.  We use those CALL_GRAPH edges to drive
+        argument→parameter taint propagation: for each cross-file call, zip
+        the argument nodes at the call site with the parameter nodes inside
+        the callee function and emit DFG_PARAM_PASS edges so PathDiscovery
+        can follow taint through cross-file function boundaries.
+
+        Same-file arg→param edges were already created by the per-file
+        InterproceduralDFG pass; we skip those here to avoid duplicates.
+        """
+        node_map: Dict[str, GraphNode] = {n.id: n for n in graph.nodes}
+
+        _PARAM_TYPE = {NodeType.PARAMETER}
+        _ARG_TYPES = {
+            NodeType.EXPRESSION, NodeType.IDENTIFIER, NodeType.LITERAL,
+            NodeType.MEMBER_ACCESS, NodeType.CALL_EXPRESSION,
+            NodeType.FUNCTION, NodeType.ASYNC_FUNCTION,
+            NodeType.ARROW_FUNCTION, NodeType.METHOD, NodeType.LAMBDA,
+        }
+        _CALLEE_TYPES = {NodeType.IDENTIFIER, NodeType.MEMBER_ACCESS}
+
+        # ── 1. Build function → ordered param node IDs ────────────────────────
+        func_params: Dict[str, List[str]] = {}
+        for edge in graph.edges:
+            if edge.type != EdgeType.AST_CHILD:
+                continue
+            child = node_map.get(edge.to_node)
+            if child and child.type in _PARAM_TYPE:
+                func_params.setdefault(edge.from_node, []).append(child.id)
+
+        # ── 2. Build call → callee child (to exclude from arg list) ──────────
+        call_callee_child: Dict[str, str] = {}
+        for edge in graph.edges:
+            if edge.type != EdgeType.AST_CHILD:
+                continue
+            parent = node_map.get(edge.from_node)
+            if not parent or parent.type != NodeType.CALL_EXPRESSION:
+                continue
+            child = node_map.get(edge.to_node)
+            if child and child.type in _CALLEE_TYPES:
+                call_callee_child.setdefault(edge.from_node, child.id)
+
+        # ── 3. Build call → ordered arg node IDs (excluding callee child) ────
+        call_args: Dict[str, List[str]] = {}
+        for edge in graph.edges:
+            if edge.type != EdgeType.AST_CHILD:
+                continue
+            parent = node_map.get(edge.from_node)
+            if not parent or parent.type != NodeType.CALL_EXPRESSION:
+                continue
+            child = node_map.get(edge.to_node)
+            if not child:
+                continue
+            if call_callee_child.get(edge.from_node) == child.id:
+                continue  # skip the callee identifier
+            if child.type in _ARG_TYPES:
+                call_args.setdefault(edge.from_node, []).append(child.id)
+
+        # ── 4. Walk CALL_GRAPH edges → emit DFG_PARAM_PASS for cross-file ────
+        existing = {(e.from_node, e.to_node, e.type) for e in graph.edges}
+        new_edges: List[GraphEdge] = []
+
+        for edge in graph.edges:
+            if edge.type != EdgeType.CALL_GRAPH:
+                continue
+            call_id = edge.from_node
+            func_id = edge.to_node
+
+            args   = call_args.get(call_id, [])
+            params = func_params.get(func_id, [])
+            if not args or not params:
+                continue
+
+            call_node = node_map.get(call_id)
+            func_node = node_map.get(func_id)
+
+            # Skip same-file calls — per-file InterproceduralDFG already handled them
+            if call_node and func_node and call_node.file == func_node.file:
+                continue
+
+            for i, (arg_id, param_id) in enumerate(zip(args, params)):
+                key = (arg_id, param_id, EdgeType.DFG_PARAM_PASS)
+                if key in existing:
+                    continue
+                dfg_edge = GraphEdge(
+                    **{"from": arg_id, "to": param_id, "type": EdgeType.DFG_PARAM_PASS}
+                )
+                dfg_edge.metadata = {
+                    "dfg_edge_type": DFGEdgeType.DFG_ARG_PASS.value,
+                    "cross_file": True,
+                    "arg_position": i,
+                    "confidence": 0.9,
+                    "callee": func_node.name if func_node else "",
+                    "callee_file": func_node.file if func_node else "",
+                }
+                new_edges.append(dfg_edge)
+                existing.add(key)
+
+        if new_edges:
+            graph.edges.extend(new_edges)
+            self.all_edges.extend(new_edges)
+            print(f"  [cross-file taint] Added {len(new_edges)} DFG_PARAM_PASS edges across file boundaries")
 
     def _propagate_cross_file_dfg(self, cross_edges: List[GraphEdge]):
         """Add DFG edges implied by cross-file import/export links."""
