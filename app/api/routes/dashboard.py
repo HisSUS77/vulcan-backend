@@ -59,6 +59,23 @@ async def summary(
     avg_confidence = round(sum(confidences) / len(confidences), 2) if confidences else 0.0
     patch_success_rate = round(successful / total_patches, 2) if total_patches else 0.0
 
+    # Risk score 0–100: weighted sum of vulns by severity, capped at 100
+    # Critical=10pts, High=5pts, Medium=2pts, Low=0.5pts — saturates at 100
+    raw_risk = (
+        severity["CRITICAL"] * 10 +
+        severity["HIGH"]     * 5  +
+        severity["MEDIUM"]   * 2  +
+        severity["LOW"]      * 0.5
+    )
+    risk_score = min(100, round(raw_risk))
+    risk_label = (
+        "Critical" if risk_score >= 75 else
+        "High"     if risk_score >= 50 else
+        "Medium"   if risk_score >= 25 else
+        "Low"      if risk_score >  0  else
+        "Clean"
+    )
+
     return {
         "totals": {
             "repos": repo_count,
@@ -68,6 +85,7 @@ async def summary(
             "patches_applied": applied,
         },
         "severity": severity,
+        "risk": {"score": risk_score, "label": risk_label},
         "ai": {"patch_success_rate": patch_success_rate, "avg_confidence": avg_confidence},
         "trend": [],
     }

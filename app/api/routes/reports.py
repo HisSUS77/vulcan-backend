@@ -5,6 +5,95 @@ from app.api.deps import get_current_user
 from app.db.mongo import get_mongo_db
 from app.services.report_service import ReportService
 from io import BytesIO
+import json
+
+
+def _build_sarif(report: dict, scan_id: str) -> dict:
+    """Convert a Vulcan scan report to SARIF 2.1.0 format."""
+    vulns = []
+    if isinstance(report, dict):
+        vulns = report.get("vulnerabilities", []) or []
+    elif hasattr(report, "vulnerabilities"):
+        vulns = report.vulnerabilities or []
+
+    rules_seen: dict = {}
+    for v in vulns:
+        rid = (v.get("cwe") or v.get("type") or "UNKNOWN").replace(" ", "_")
+        if rid not in rules_seen:
+            rules_seen[rid] = {
+                "id": rid,
+                "name": v.get("type", rid),
+                "shortDescription": {"text": v.get("type", rid)},
+                "helpUri": (
+                    f"https://cwe.mitre.org/data/definitions/{rid.replace('CWE-','')}.html"
+                    if rid.startswith("CWE-") else "https://owasp.org"
+                ),
+                "properties": {
+                    "tags": [v.get("owasp", ""), rid],
+                    "security-severity": str(v.get("cvss_score", 5.0)),
+                },
+            }
+
+    results = []
+    for v in vulns:
+        rid = (v.get("cwe") or v.get("type") or "UNKNOWN").replace(" ", "_")
+        loc = v.get("location", {})
+        file_path  = loc.get("file", "unknown").replace("\\", "/")
+        start_line = max(1, loc.get("start_line", 1))
+        end_line   = max(start_line, loc.get("end_line", start_line))
+        level = {"critical": "error", "high": "error",
+                 "medium": "warning", "low": "note"}.get(
+            (v.get("severity") or "").lower(), "warning"
+        )
+        snippet = (v.get("evidence") or {}).get("code_snippet", "")
+        llm     = (v.get("analysis") or {}).get("llm_classification", {})
+        message = (
+            f"{v.get('type','Vulnerability')} — "
+            f"Source: {(v.get('evidence') or {}).get('source','')} → "
+            f"Sink: {(v.get('evidence') or {}).get('sink','')}. "
+            f"CVSS {v.get('cvss_score','N/A')}. "
+            f"{llm.get('explanation','')}"
+        ).strip()
+
+        results.append({
+            "ruleId": rid,
+            "level": level,
+            "message": {"text": message},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": file_path, "uriBaseId": "%SRCROOT%"},
+                    "region": {
+                        "startLine": start_line,
+                        "endLine": end_line,
+                        **({"snippet": {"text": snippet[:500]}} if snippet else {}),
+                    },
+                }
+            }],
+            "properties": {
+                "severity":   v.get("severity"),
+                "confidence": v.get("confidence"),
+                "cvss_score": v.get("cvss_score"),
+                "cwe":        v.get("cwe"),
+                "owasp":      v.get("owasp"),
+            },
+        })
+
+    return {
+        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "Vulcan",
+                    "version": "1.0.0",
+                    "informationUri": "https://github.com/HisSUS77/vulcan-backend",
+                    "rules": list(rules_seen.values()),
+                }
+            },
+            "results": results,
+            "properties": {"scan_id": scan_id},
+        }],
+    }
 
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -94,10 +183,22 @@ async def export_report(
             raise HTTPException(status_code=404, detail="Report not found")
         return report
     
+    elif format.lower() == "sarif":
+        service = ReportService(db)
+        report = await service.get(scan_id, user)
+        if not report:
+            raise HTTPException(status_code=404, detail="Report not found")
+        sarif = _build_sarif(report, scan_id)
+        return Response(
+            content=json.dumps(sarif, indent=2),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=vulcan-{scan_id}.sarif"},
+        )
+
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported format: {format}. Use 'json', 'csv', or 'pdf'."
+            detail=f"Unsupported format: {format}. Use 'json', 'csv', 'pdf', or 'sarif'."
         )
 
 

@@ -679,38 +679,56 @@ class SemanticPipeline:
 
         return formatted_vulns
 
+    @staticmethod
+    def _compute_cvss_score(severity: str, exploitability: float) -> float:
+        """
+        Approximate CVSS v3.1 Base Score from severity band + exploitability.
+        Maps: critical 9.0-10.0, high 7.0-8.9, medium 4.0-6.9, low 0.1-3.9
+        """
+        bands = {
+            "critical": (9.0, 10.0),
+            "high":     (7.0,  8.9),
+            "medium":   (4.0,  6.9),
+            "low":      (0.1,  3.9),
+        }
+        lo, hi = bands.get((severity or "").lower(), (4.0, 6.9))
+        score = lo + (hi - lo) * max(0.0, min(1.0, exploitability))
+        return round(score, 1)
+
     def _format_vulnerability(self, vuln: ClassifiedVulnerability) -> Dict[str, Any]:
         """
         Format vulnerability for API response.
-        
+
         Args:
             vuln: Classified vulnerability
-        
+
         Returns:
             Dictionary representation
         """
+        cvss_score = self._compute_cvss_score(vuln.final_severity, vuln.llm_exploitability)
         return {
             "id": vuln.slice_id,
             "type": vuln.rule_name,
             "severity": vuln.final_severity,
             "confidence": round(vuln.final_confidence, 2),
+            "cvss_score": cvss_score,
             "owasp": vuln.owasp,
             "cwe": vuln.cwe,
-            
+
             "location": {
                 "file": vuln.location.get("file", "unknown"),
                 "start_line": vuln.location.get("start_line", 0),
                 "end_line": vuln.location.get("end_line", 0)
             },
-            
+
             "evidence": {
                 "source": vuln.source_label,
                 "sink": vuln.sink_label,
                 "pattern": vuln.pattern_type,
                 "code_snippet": vuln.code_snippet,
-                "data_flow_path": vuln.path_nodes  # Complete taint flow path for visualization
+                "data_flow_path": vuln.path_nodes
             },
-            
+
             "analysis": {
                 "static_detection": {
                     "severity": vuln.static_severity,
