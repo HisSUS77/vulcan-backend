@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
@@ -12,9 +12,81 @@ from app.core.permissions import can_access_resource
 from app.core.exceptions import AuthorizationException, ResourceNotFoundException
 from datetime import datetime
 from app.core.trace import trace_step
+import asyncio
 
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+
+_TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
+
+
+@router.websocket("/ws/{scan_id}")
+async def scan_ws(
+    scan_id: str,
+    websocket: WebSocket,
+    token: str = Query(None),
+):
+    """Stream scan progress + logs over WebSocket.
+
+    Connect: ws://<host>/api/v1/scans/ws/<scan_id>?token=<jwt>
+    Messages sent (JSON):
+      {type:"status", state, progress, eta}
+      {type:"logs",   lines:[...]}
+      {type:"done",   state, summary?}
+      {type:"error",  message}
+    """
+    from app.core.security import decode_token
+
+    if not token:
+        await websocket.close(code=4001)
+        return
+    try:
+        payload = decode_token(token)
+        user_id = str(payload.get("sub", ""))
+    except Exception:
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+
+    from app.db.mongo import get_mongo_database
+    db = get_mongo_database()
+
+    last_log_count = 0
+    try:
+        while True:
+            scan = await db.scans.find_one({"scan_id": scan_id})
+            if not scan:
+                await websocket.send_json({"type": "error", "message": "Scan not found"})
+                break
+
+            state    = scan.get("state", "UNKNOWN")
+            progress = scan.get("progress", 0)
+            await websocket.send_json({
+                "type": "status",
+                "state": state,
+                "progress": progress,
+                "eta": scan.get("eta", ""),
+            })
+
+            logs     = scan.get("logs", [])
+            new_logs = logs[last_log_count:]
+            if new_logs:
+                await websocket.send_json({"type": "logs", "lines": new_logs})
+                last_log_count = len(logs)
+
+            if state in _TERMINAL:
+                payload_out: dict = {"type": "done", "state": state}
+                if state == "COMPLETED":
+                    payload_out["summary"] = scan.get("summary", {})
+                await websocket.send_json(payload_out)
+                break
+
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 @router.post("/start", status_code=202, response_model=ScanResponse)

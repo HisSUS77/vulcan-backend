@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import auth, dashboard, repositories, scans, graphs, patches, reports, notifications, analysis, scan, admin, sandbox, benchmark
+from app.api.routes import auth, dashboard, repositories, scans, graphs, patches, reports, notifications, analysis, scan, admin, sandbox, benchmark, attack_surface
 
 
 api_router = APIRouter()
@@ -16,3 +16,4 @@ api_router.include_router(scan.router)
 api_router.include_router(sandbox.router)
 api_router.include_router(admin.router)
 api_router.include_router(benchmark.router)
+api_router.include_router(attack_surface.router)
