@@ -115,10 +115,11 @@
     "regex_patterns": [
       "os\\.system\\s*\\(",
       "os\\.popen\\s*\\(",
-      "subprocess\\.(call|Popen|run|check_call|check_output)\\s*\\(",
       "shell\\s*=\\s*True",
       "commands\\.getoutput\\s*\\(",
-      "commands\\.getstatusoutput\\s*\\("
+      "commands\\.getstatusoutput\\s*\\(",
+      "child_process\\.exec\\s*\\(",
+      "child_process\\.execSync\\s*\\("
     ]
   },
   "CODE_INJECTION": {
@@ -163,8 +164,8 @@
     "confidence": "high",
     "regex_patterns": [
       "eval\\s*\\(",
-      "exec\\s*\\(",
-      "execfile\\s*\\(",
+      "(?<![a-zA-Z0-9_])exec\\s*\\(",
+      "(?<![a-zA-Z0-9_])execfile\\s*\\(",
       "__import__\\s*\\("
     ]
   },
@@ -250,7 +251,9 @@
       "fs.writeFile",
       "fs.readFileSync",
       "fs.writeFileSync",
-      "path.join"
+      "path.join",
+      "send_file",
+      "res.sendFile"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -266,7 +269,10 @@
       "open\\s*\\([^)]*\\+",
       "open\\s*\\([^)]*user",
       "os\\.path\\.join\\s*\\([^)]*(?:request|args|query|param|user)",
-      "pathlib\\.Path\\s*\\([^)]*\\+"
+      "pathlib\\.Path\\s*\\([^)]*\\+",
+      "send_file\\s*\\([^)]*(?:request\\.args|request\\.form|request\\.get|request\\.values)",
+      "res\\.sendFile\\s*\\([^)]*(?:req\\.(?:query|params|body))",
+      "path\\.join\\s*\\([^)]*req\\.(?:query|params|body)"
     ]
   },
   "SSRF": {
@@ -318,9 +324,9 @@
     ],
     "confidence": "medium",
     "regex_patterns": [
-      "requests\\.(get|post|put|delete|request)\\s*\\(",
-      "urllib\\.request\\.urlopen\\s*\\(",
-      "httpx\\.(get|post)\\s*\\("
+      "requests\\.(get|post|put|delete|request)\\s*\\([^)]*(?:request\\.|req\\.)",
+      "urllib\\.request\\.urlopen\\s*\\([^)]*(?:request\\.|req\\.)",
+      "httpx\\.(get|post)\\s*\\([^)]*(?:request\\.|req\\.)"
     ]
   },
   "BROKEN_ACCESS_CONTROL": {
@@ -399,8 +405,7 @@
       "yaml.load",
       "yaml.unsafe_load",
       "marshal.loads",
-      "marshal.load",
-      "JSON.parse"
+      "marshal.load"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -414,7 +419,7 @@
     "confidence": "high",
     "regex_patterns": [
       "pickle\\.loads?\\s*\\(",
-      "yaml\\.load\\s*\\(",
+      "yaml\\.load\\s*\\((?![^\\n]*SafeLoader)",
       "yaml\\.unsafe_load\\s*\\(",
       "marshal\\.loads?\\s*\\(",
       "jsonpickle\\.decode\\s*\\(",
@@ -458,7 +463,11 @@
       "Crypt\\.Hash\\.(?:MD5|SHA)\\.new\\s*\\(",
       "MD5\\.new\\s*\\(",
       "import\\s+MD5",
-      "from\\s+Crypto\\.Hash\\s+import\\s+MD5"
+      "from\\s+Crypto\\.Hash\\s+import\\s+MD5",
+      "RSA\\.generate\\s*\\(\\s*(?:512|1024)\\b",
+      "key_size\\s*=\\s*(?:512|1024)\\b",
+      "generate_private_key\\([^,)]*(?:512|1024)",
+      "dh\\.generate_parameters\\([^)]*(?:512|1024)"
     ]
   },
   "HARDCODED_SECRETS": {
@@ -477,22 +486,22 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)\\b(password|passwd|pwd)\\s*=\\s*['\"][^'\"{}]{3,}['\"]",
-      "(?i)\\b(secret_?key|app_?secret|flask_?secret)\\s*=\\s*['\"][^'\"]{4,}['\"]",
-      "(?i)\\b(jwt_?secret|jwt_?key)\\s*=\\s*['\"][^'\"]{4,}['\"]",
-      "(?i)\\b(db_?password|database_?password|db_?pass)\\s*=\\s*['\"][^'\"]{3,}['\"]",
-      "(?i)\\b(admin_?password|root_?password|superuser_?password)\\s*=\\s*['\"][^'\"]{3,}['\"]",
-      "(?i)\\b(api_?key|access_?key|secret_?access_?key)\\s*=\\s*['\"][^'\"]{8,}['\"]",
-      "(?i)\\b(access_?token|auth_?token|bearer_?token|private_?key)\\s*=\\s*['\"][^'\"]{8,}['\"]",
-      "(?i)\\b(payment_?gateway_?key|stripe_?secret|sendgrid_?api_?key|twilio_?auth_?token)\\s*=\\s*['\"][^'\"]{8,}['\"]",
-      "(?i)\\b(github_?token|gitlab_?token|bitbucket_?token)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)\\b(password|passwd|pwd)\\s*=\\s*['\"][^'\"{}\\n\\r]{3,}['\"]",
+      "(?i)\\b(secret_?key|app_?secret|flask_?secret)\\s*=\\s*['\"][^'\"\\n\\r]{4,}['\"]",
+      "(?i)\\b(jwt_?secret|jwt_?key)\\s*=\\s*['\"][^'\"\\n\\r]{4,}['\"]",
+      "(?i)\\b(db_?password|database_?password|db_?pass)\\s*=\\s*['\"][^'\"\\n\\r]{3,}['\"]",
+      "(?i)\\b(admin_?password|root_?password|superuser_?password)\\s*=\\s*['\"][^'\"\\n\\r]{3,}['\"]",
+      "(?i)\\b(api_?key|access_?key|secret_?access_?key)\\s*=\\s*['\"][^'\"\\n\\r]{8,}['\"]",
+      "(?i)\\b(access_?token|auth_?token|bearer_?token|private_?key)\\s*=\\s*['\"][^'\"\\n\\r]{8,}['\"]",
+      "(?i)\\b(payment_?gateway_?key|stripe_?secret|sendgrid_?api_?key|twilio_?auth_?token)\\s*=\\s*['\"][^'\"\\n\\r]{8,}['\"]",
+      "(?i)\\b(github_?token|gitlab_?token|bitbucket_?token)\\s*=\\s*['\"][^'\"\\n\\r]{8,}['\"]",
       "(?i)SG\\.[a-zA-Z0-9_.\\-]{22,}",
       "(?i)pk_live_[a-zA-Z0-9]{20,}",
       "(?i)sk_live_[a-zA-Z0-9]{20,}",
       "ghp_[a-zA-Z0-9]{36}",
       "glpat-[a-zA-Z0-9_\\-]{20,}",
-      "(?i)AWS_SECRET_ACCESS_KEY\\s*=\\s*['\"][^'\"]{20,}['\"]",
-      "(?i)PRIVATE_KEY\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "(?i)AWS_SECRET_ACCESS_KEY\\s*=\\s*['\"][^'\"\\n\\r]{20,}['\"]",
+      "(?i)PRIVATE_KEY\\s*=\\s*['\"][^'\"\\n\\r]{8,}['\"]",
       "-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"
     ],
     "confidence": "high"
@@ -559,7 +568,13 @@
     "sanitizers": [
       "escape_filter_chars"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "ldap\\.search\\s*\\(",
+      "ldap\\.bind\\s*\\(",
+      "search_s\\s*\\(",
+      "ldap3\\.Connection\\s*\\([^)]*(?:request\\.|req\\.)"
+    ]
   },
   "XML_INJECTION": {
     "rule_id": "XML_INJECTION",
@@ -813,7 +828,12 @@
       "sanitize",
       "validate"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "\\$where",
+      "\\.find(?:One)?\\s*\\(\\{[^}]*\\$",
+      "collection\\.(?:find|findOne|update|remove|deleteOne)\\s*\\([^)]*(?:req\\.|request\\.)"
+    ]
   },
   "INSECURE_RANDOM": {
     "rule_id": "INSECURE_RANDOM",
@@ -883,7 +903,12 @@
       "is_safe_url",
       "validateRedirect"
     ],
-    "confidence": "medium"
+    "confidence": "medium",
+    "regex_patterns": [
+      "res\\.redirect\\s*\\([^)]*(?:req\\.(?:query|params|body))",
+      "location\\.href\\s*=\\s*[^;]*(?:req\\.|request\\.)",
+      "redirect\\s*\\([^)]*(?:request\\.args|request\\.form)"
+    ]
   },
   "JWT_WEAK_SECRET": {
     "rule_id": "JWT_WEAK_SECRET",
@@ -1116,8 +1141,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "set_cookie\\([^)]*\\)",
-      "res\\.cookie\\([^)]*\\)"
+      "set_cookie\\((?![^\\n]*secure\\s*=\\s*True)[^)]*\\)",
+      "res\\.cookie\\((?![^\\n]*secure\\s*:\\s*true)[^)]*\\)"
     ],
     "sanitizers": [
       "secure=True",
@@ -1186,7 +1211,7 @@
     "patterns": [],
     "regex_patterns": [
       "http://[^\\s'\\\"]+(?:password|token|api.?key|secret|credential)",
-      "['\\\"]http://[^'\\\"]+['\\\"]"
+      "requests\\.(get|post|put|delete|request)\\s*\\(\\s*['\\\"]http://[^'\\\"]+['\\\"]"
     ],
     "sanitizers": [],
     "confidence": "medium"
@@ -1269,13 +1294,18 @@
       "re.compile",
       "re.match",
       "re.search",
-      "new RegExp"
+      "new RegExp",
+      ".test"
     ],
     "patterns": [
       "DFG_FLOW"
     ],
     "sanitizers": [],
-    "confidence": "low"
+    "confidence": "low",
+    "regex_patterns": [
+      "new RegExp\\s*\\([^)]*(?:req\\.|request\\.)",
+      "\\.test\\s*\\([^)]*(?:req\\.|request\\.)"
+    ]
   },
   "INFORMATION_EXPOSURE_ERROR": {
     "rule_id": "INFORMATION_EXPOSURE_ERROR",
@@ -1294,7 +1324,7 @@
     "patterns": [],
     "regex_patterns": [
       "debug\\s*=\\s*True",
-      "app\\.run\\(.*debug",
+      "app\\.run\\(.*debug\\s*=\\s*True",
       "return\\s+str\\s*\\(\\s*e\\s*\\)",
       "traceback\\.format_exc\\s*\\(",
       "return\\s+traceback",
@@ -1364,7 +1394,7 @@
     "regex_patterns": [
       "jsonify\\s*\\([^)]*(?:password|token|secret|key)",
       "json\\.dumps\\s*\\([^)]*(?:password|token|secret|key)",
-      "(?:password|secret|token|api_key)\\s*=\\s*['\\\"][^'\\\"{}]{4,}['\\\"]"
+      "(?:password|secret|token|api_key)\\s*=\\s*['\\\"][^'\\\"{}\\n\\r]{4,}['\\\"]"
     ]
   },
   "CLICKJACKING_NO_HEADER": {
