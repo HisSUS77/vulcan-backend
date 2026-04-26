@@ -1,4 +1,5 @@
 import asyncio
+import re as _re
 import tempfile
 import os
 import time
@@ -167,6 +168,49 @@ class ScanService:
                 path_str = best
         return path_str
 
+    @staticmethod
+    def _vuln_type_group(type_str: str) -> str:
+        t = (type_str or "").lower()
+        if "sql injection" in t:                                   return "sql_injection"
+        if "os command" in t or "command injection" in t:         return "command_injection"
+        if "code injection" in t or "eval" in t:                  return "code_injection"
+        if "server-side template" in t or "template inject" in t: return "ssti"
+        if "ssrf" in t or "server-side request forgery" in t:     return "ssrf"
+        if "sensitive data" in t:                                  return "sensitive_data"
+        if "insecure direct object" in t or "idor" in t or "broken access control" in t:
+            return "broken_access_control"
+        if "file upload" in t:                                     return "file_upload"
+        if "cross-site scripting" in t or "xss" in t:             return "xss"
+        return t.replace(" ", "_").replace("-", "_")
+
+    @staticmethod
+    def _vuln_score(vuln: dict) -> tuple:
+        evidence = vuln.get("evidence") or {}
+        is_dfg   = 1 if (evidence.get("pattern") or "") == "DFG_FLOW" else 0
+        path_len = len(evidence.get("data_flow_path") or [])
+        conf     = vuln.get("confidence") or 0
+        return (is_dfg, path_len, conf)
+
+    @staticmethod
+    def _extract_sink_line(vuln: dict) -> int:
+        """Find the line where the sink function actually appears in the snippet.
+
+        DFG paths can run top-down (source L22 → sink L27) or bottom-up
+        (sink L111 → source L138). Using end_line breaks the bottom-up case.
+        Instead, scan the code_snippet for the first line that contains the
+        sink function name — that is the true sink line regardless of direction.
+        """
+        evidence = vuln.get("evidence") or {}
+        location = vuln.get("location") or {}
+        snippet  = evidence.get("code_snippet") or ""
+        sink     = str(evidence.get("sink") or "")
+        if sink and sink != "regex":
+            for raw_line in snippet.split("\n"):
+                m = _re.match(r"(?:>>>)?\s*(\d+)\s*\|", raw_line)
+                if m and sink in raw_line:
+                    return int(m.group(1))
+        return location.get("end_line") or location.get("start_line") or 0
+
     def _dedupe_vulnerabilities(
         self,
         repo_root: Optional[Path],
@@ -175,10 +219,10 @@ class ScanService:
     ) -> list[dict]:
         if not vulnerabilities:
             return []
-        deduped: list[dict] = []
-        seen: dict[tuple, dict] = {}
+
+        # ── Step 0: normalise file paths ─────────────────────────────────
         for vuln in vulnerabilities:
-            location = vuln.get("location") or {}
+            location  = vuln.get("location") or {}
             file_path = location.get("file")
             if repo_root:
                 normalized = self._normalize_repo_path(repo_root, file_path, rel_paths)
@@ -186,28 +230,87 @@ class ScanService:
                 normalized = str(file_path).replace("\\", "/") if file_path else None
             if normalized:
                 location["file"] = normalized
-                vuln["location"] = location
+                vuln["location"]  = location
+
+        # ── Step 1: collapse DFG findings by (type_group, file, sink_line, sink)
+        # Uses the actual sink line extracted from the code snippet so that
+        # multiple sub-paths to the same sink (differing only in their source
+        # start line) all resolve to the same key. Keeps the longest / highest-
+        # confidence path.
+        dfg_seen: dict[tuple, dict] = {}
+        regex_vulns: list[dict]     = []
+
+        for vuln in vulnerabilities:
+            location = vuln.get("location") or {}
             evidence = vuln.get("evidence") or {}
-            key = (
-                str(vuln.get("type") or ""),
-                self._path_key(normalized),
-                location.get("start_line"),
-                location.get("end_line"),
-                str(evidence.get("sink") or ""),
-                str(evidence.get("source") or ""),
-            )
-            existing = seen.get(key)
-            if existing:
-                existing_conf = existing.get("confidence") or 0
-                new_conf = vuln.get("confidence") or 0
-                if new_conf > existing_conf:
-                    idx = deduped.index(existing)
-                    deduped[idx] = vuln
-                    seen[key] = vuln
+            pattern  = str(evidence.get("pattern") or "")
+            file_key = self._path_key(location.get("file"))
+            type_key = self._vuln_type_group(vuln.get("type"))
+
+            if pattern == "DFG_FLOW":
+                sink_line = self._extract_sink_line(vuln)
+                sink      = str(evidence.get("sink") or "")
+                key       = (type_key, file_key, sink_line, sink)
+                existing  = dfg_seen.get(key)
+                if existing is None or self._vuln_score(vuln) > self._vuln_score(existing):
+                    dfg_seen[key] = vuln
+            else:
+                regex_vulns.append(vuln)
+
+        # ── Step 1b: drop REGEX findings superseded by a nearby DFG sink ─
+        # A REGEX finding at line R is redundant when a DFG finding already
+        # covers the same vulnerability at a sink within 3 lines of R.
+        dfg_sink_lines: dict[tuple, set] = {}
+        for (tg, fk, sl, _), _ in dfg_seen.items():
+            dfg_sink_lines.setdefault((tg, fk), set()).add(sl)
+
+        surviving_regex: list[dict] = []
+        for vuln in regex_vulns:
+            location = vuln.get("location") or {}
+            file_key = self._path_key(location.get("file"))
+            type_key = self._vuln_type_group(vuln.get("type"))
+            r_line   = location.get("start_line") or 0
+            nearby   = dfg_sink_lines.get((type_key, file_key), set())
+            if any(abs(r_line - sl) <= 3 for sl in nearby):
+                continue  # DFG result supersedes this REGEX entry
+            surviving_regex.append(vuln)
+
+        # ── Step 1c: collapse surviving REGEX findings among themselves ───
+        # Multiple regex patterns can fire on the same line (e.g. both
+        # "Code Injection" and "Code Injection via eval()" at L36).
+        regex_seen: dict[tuple, dict] = {}
+        for vuln in surviving_regex:
+            location = vuln.get("location") or {}
+            file_key = self._path_key(location.get("file"))
+            type_key = self._vuln_type_group(vuln.get("type"))
+            r_line   = location.get("start_line") or 0
+            rkey     = (type_key, file_key, r_line)
+            existing = regex_seen.get(rkey)
+            if existing is None or self._vuln_score(vuln) > self._vuln_score(existing):
+                regex_seen[rkey] = vuln
+
+        step1 = list(dfg_seen.values()) + list(regex_seen.values())
+
+        # ── Step 2: collapse by identical data_flow_path ─────────────────
+        # Catches the same taint trace classified as multiple vuln types
+        # (e.g. the SQL-injection DFG path also filed as IDOR/BAC).
+        # Keeps the higher-scoring classification.
+        path_seen: dict[tuple, int] = {}
+        final: list[dict] = []
+        for vuln in step1:
+            evidence = vuln.get("evidence") or {}
+            path     = tuple(evidence.get("data_flow_path") or [])
+            if not path:
+                final.append(vuln)
                 continue
-            seen[key] = vuln
-            deduped.append(vuln)
-        return deduped
+            existing_idx = path_seen.get(path)
+            if existing_idx is None:
+                path_seen[path] = len(final)
+                final.append(vuln)
+            elif self._vuln_score(vuln) > self._vuln_score(final[existing_idx]):
+                final[existing_idx] = vuln
+
+        return final
 
     def _filter_graph_for_file(
         self,

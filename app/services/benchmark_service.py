@@ -89,7 +89,7 @@ class BenchmarkService:
         if not test_cases:
             return BenchmarkRun(run_date=datetime.now(timezone.utc))
 
-        pipeline = get_pipeline(PipelineConfig(enable_llm=enable_llm))
+        pipeline = get_pipeline(PipelineConfig(enable_llm=enable_llm, enable_exploit=False))
         start_ms = time.time()
 
         tp = fp = fn = tn = 0

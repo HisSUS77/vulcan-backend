@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 class PipelineConfig:
     """Configuration for semantic analysis pipeline."""
     enable_llm: Optional[bool] = None  # None means: read from env
+    enable_exploit: bool = True        # set False to skip PoC exploit generation (e.g. benchmark)
     max_graph_nodes: int = 200_000
     max_path_length: int = 50
     max_paths_per_rule: int = 100
@@ -631,6 +632,8 @@ class SemanticPipeline:
         calls just pile up on the throttle lock and cause repeated retries.
         Non-blocking: any failure leaves the finding unchanged.
         """
+        if not self.config.enable_exploit:
+            return formatted_vulns
         try:
             from semantic_engine.classifier.exploit_llm_service import get_exploit_service
             exploit_svc = get_exploit_service()
@@ -791,7 +794,8 @@ def get_pipeline(config: Optional[PipelineConfig] = None) -> SemanticPipeline:
     if _pipeline_instance is None:
         _pipeline_instance = SemanticPipeline(config)
     elif config is not None:
-        if _pipeline_instance.config.enable_llm != config.enable_llm:
+        if (_pipeline_instance.config.enable_llm != config.enable_llm or
+                _pipeline_instance.config.enable_exploit != config.enable_exploit):
             _pipeline_instance = SemanticPipeline(config)
     
     return _pipeline_instance
