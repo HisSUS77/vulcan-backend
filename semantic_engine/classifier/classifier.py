@@ -4,6 +4,7 @@ Orchestrates LLM-based classification of code slices.
 Reduces false positives from static analysis.
 """
 import logging
+import re
 from typing import List, Optional
 from dataclasses import dataclass
 
@@ -229,11 +230,27 @@ class SliceClassifier:
             # Fallback when LLM disabled
             llm_result = self._get_static_only_result(slice_obj)
         
+        # Programmatic safe-pattern override — catches well-known FP patterns
+        # regardless of what the LLM decided (parameterized SQL, subprocess list, etc.)
+        if llm_result.classification != Classification.SAFE and \
+                self._code_is_safe(slice_obj.rule_id, slice_obj.code_snippet):
+            from semantic_engine.classifier.llm_service import LLMClassificationResult as _R
+            llm_result = _R(
+                classification=Classification.SAFE,
+                explanation="Safe pattern detected: parameterized query / list args / allowlist / static template.",
+                severity="low",
+                exploitability_score=0.0,
+                remediation="No action required.",
+                cwe=slice_obj.cwe,
+                owasp=slice_obj.owasp,
+                confidence=0.95,
+            )
+
         # Combine static + LLM results
         final_severity, final_confidence, is_vulnerable = self._combine_results(
             slice_obj, llm_result
         )
-        
+
         # Filter out SAFE classifications
         if not is_vulnerable:
             logger.debug(f"Filtered out SAFE slice: {slice_obj.slice_id}")
@@ -266,6 +283,35 @@ class SliceClassifier:
             is_vulnerable=is_vulnerable
         )
     
+    # Patterns that definitively indicate safe code — override LLM VULNERABLE verdicts.
+    _PARAMETERIZED_SQL  = re.compile(r'execute\s*\(\s*[\'"][^\'"]*%s[^\'"]*[\'"],\s*[\[\(]', re.IGNORECASE)
+    _PARAMETERIZED_SQL2 = re.compile(r'execute\s*\(\s*[\'"][^\'"]*\?[^\'"]*[\'"],\s*[\[\(]', re.IGNORECASE)
+    _SUBPROCESS_LIST    = re.compile(r'subprocess\.(?:run|Popen|call|check_output)\s*\(\s*\[', re.IGNORECASE)
+    _EXECFILE_ARRAY     = re.compile(r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', re.IGNORECASE)
+    _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
+    _STATIC_TEMPLATE    = re.compile(r"render_template_string\s*\(\s*['\"]", re.IGNORECASE)
+    _ALLOWLIST_CHECK    = re.compile(r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse)\s*\(', re.IGNORECASE)
+
+    _SAFE_RULES_PATTERNS: dict = {}  # populated lazily per rule_id
+
+    def _code_is_safe(self, rule_id: str, code: str) -> bool:
+        """Return True when the code snippet contains a definitively safe pattern."""
+        if self._DEFUSEDXML.search(code):
+            return True
+        if rule_id in ("SQL_INJECTION", "NOSQL_INJECTION"):
+            if self._PARAMETERIZED_SQL.search(code) or self._PARAMETERIZED_SQL2.search(code):
+                return True
+        if rule_id == "COMMAND_INJECTION":
+            if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
+                return True
+        if rule_id == "TEMPLATE_INJECTION":
+            if self._STATIC_TEMPLATE.search(code):
+                return True
+        if rule_id in ("SSRF", "UNVALIDATED_REDIRECT"):
+            if self._ALLOWLIST_CHECK.search(code):
+                return True
+        return False
+
     def _get_static_only_result(self, slice_obj: CodeSlice) -> LLMClassificationResult:
         """
         Get fallback result when LLM is disabled or bypassed.

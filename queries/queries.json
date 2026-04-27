@@ -341,10 +341,10 @@
       "urllib\\.request\\.urlopen\\s*\\([^)]*(?:request\\.|req\\.)",
       "httpx\\.(get|post)\\s*\\([^)]*(?:request\\.|req\\.)",
       "request\\.(?:args|form|json|get_json)(?:\\.get)?\\s*\\(['\"](?:url|URL|callback|target|redirect|hook|endpoint|src|href)['\"]\\)[\\s\\S]{0,400}(?:requests?\\.(get|post)|urlopen|httpx\\.(?:get|post)|axios\\.(?:get|post)|fetch)\\s*\\(",
-      "req\\.(?:query|body|params)\\.(?:url|URL|callback|target|redirect|hook|endpoint)[\\s\\S]{0,400}(?:axios\\.(?:get|post)|fetch\\s*\\(|http\\.(?:get|request)|https\\.(?:get|request))",
+      "(?![\\s\\S]{0,600}(?:ALLOWED\\w*\\.has|allowedHosts|allowlist|validateUrl))req\\.(?:query|body|params)\\.(?:url|URL|callback|target|redirect|hook|endpoint)[\\s\\S]{0,400}(?:axios\\.(?:get|post)|fetch\\s*\\(|http\\.(?:get|request)|https\\.(?:get|request))",
       "urllib\\.request\\.urlopen\\s*\\([a-zA-Z_]",
       "httpx\\.(get|post)\\s*\\([a-zA-Z_][^)]*url[^)]*\\)",
-      "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains))"
+      "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains|ALLOWED))"
     ]
   },
   "BROKEN_ACCESS_CONTROL": {
@@ -929,7 +929,7 @@
       "res\\.redirect\\s*\\([^)]*(?:req\\.(?:query|params|body))",
       "location\\.href\\s*=\\s*[^;]*(?:req\\.|request\\.)",
       "redirect\\s*\\([^)]*(?:request\\.args|request\\.form)",
-      "redirect\\s*\\([^)]*(?:next|url|return|redirect|location|dest|target|returnUrl|goto)[^)]*\\)(?![^)]*(?:is_safe_url|urlparse|validate))",
+      "redirect\\s*\\([^)]*\\b(?:next|url|goto|dest|target|returnUrl)\\b(?![^)]*(?:is_safe_url|urlparse|validate))[^)]*\\)",
       "res\\.redirect\\s*\\(\\s*[^'\"\\s\\)][^)]*\\)(?![^)]*(?:is_safe_url|urlparse|validate))",
       "window\\.location(?:\\.href)?\\s*=\\s*[a-zA-Z_]\\w*",
       "(?![\\.\\s\\S]{0,800}(?:urlparse|is_safe_url|validateRedirect|ALLOWED\\.has|allowlist))request\\.(?:args|form|get_json)(?:\\.get)?\\s*\\(['\"](?:next|url|redirect|return|returnUrl|goto|back|target)['\"]\\)[\\s\\S]{0,300}(?:redirect\\s*\\(|window\\.location|res\\.redirect)"
@@ -1330,8 +1330,8 @@
     "regex_patterns": [
       "new RegExp\\s*\\([^)]*(?:req\\.|request\\.)",
       "\\.test\\s*\\([^)]*(?:req\\.|request\\.)",
-      "re\\.(?:match|search|fullmatch)\\s*\\([^,]+,\\s*(?:request\\.(?:args|form|json|get_json)|req\\.(?:query|params|body))",
-      "request\\.(?:args|form)(?:\\.get\\s*\\([^)]+\\)|\\.[a-zA-Z_]+)[\\s\\S]{0,200}re\\.(?:match|search|fullmatch)\\s*\\(",
+      "re\\.(?:match|search|fullmatch)\\s*\\(r?['\\\"][^'\\\"]*\\)+[+*][^'\\\"]*['\\\"],\\s*(?:request\\.(?:args|form|json|get_json)|req\\.(?:query|params|body))",
+      "request\\.(?:args|form)(?:\\.get\\s*\\([^)]+\\)|\\.(?!get\\b)[a-zA-Z_]+)[\\s\\S]{0,200}re\\.(?:match|search|fullmatch)\\s*\\(r?['\\\"][^'\\\"]*\\)+[+*]",
       "\\.test\\s*\\((?:req\\.|request\\.|[a-zA-Z_]\\w*(?:input|data|query|search|term))"
     ]
   },
@@ -1787,8 +1787,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)(?:logger\\.|logging\\.)\\w+\\([^\\n]*(password|token|secret)(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash|sanitize))",
-      "(?i)console\\.(log|error|warn)\\([^\\n]*(password|token|secret)(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash))"
+      "(?i)(?:logger\\.|logging\\.)\\w+\\([^\\n]*(?:f['\\\"]\\w*[^\\n]*\\{[^\\n]*(?:password|token|secret)|['\\\"][^\\n]*['\\\"]\\s*[,+]\\s*[^\\n]*\\b(?:password|token|secret)\\b)(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash|sanitize))",
+      "(?i)console\\.(?:log|error|warn)\\([^\\n]*(?:['\\\"][^\\n]*['\\\"]\\s*[,+]\\s*[^\\n]*\\b(?:password|token|secret)\\b|`[^\\n]*\\$\\{[^\\n]*(?:password|token|secret))(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash))"
     ],
     "file_patterns": [
       "(?i)\\.(py|js|ts|tsx)$"
