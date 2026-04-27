@@ -172,7 +172,7 @@
     "regex_patterns": [
       "(?<![a-zA-Z0-9_.])(?<!literal_)eval\\s*\\(",
       "(?<![a-zA-Z0-9_])exec\\s*\\(",
-      "(?<![a-zA-Z0-9_])execfile\\s*\\((?![^,)]*['\"][^,)]*,\\s*\\[)",
+      "(?<![a-zA-Z0-9_])execfile\\s*\\((?![^,)]*['\\\"][^'\\\"]*['\\\"],\\s*\\[)",
       "__import__\\s*\\("
     ]
   },
@@ -270,7 +270,10 @@
       "os.path.abspath",
       "os.path.realpath",
       "path.resolve",
-      "allowlist"
+      "allowlist",
+      "os.path.normpath",
+      "path.normalize",
+      "safe_join"
     ],
     "confidence": "high",
     "regex_patterns": [

@@ -284,13 +284,24 @@ class SliceClassifier:
         )
     
     # Patterns that definitively indicate safe code — override LLM VULNERABLE verdicts.
-    _PARAMETERIZED_SQL  = re.compile(r'execute\s*\(\s*[\'"][^\'"]*%s[^\'"]*[\'"],\s*[\[\(]', re.IGNORECASE)
-    _PARAMETERIZED_SQL2 = re.compile(r'execute\s*\(\s*[\'"][^\'"]*\?[^\'"]*[\'"],\s*[\[\(]', re.IGNORECASE)
+    # Parameterized SQL: execute/query with %s, ?, or $N placeholder + tuple/array arg
+    _PARAMETERIZED_SQL  = re.compile(
+        r'(?:execute|query)\s*\(\s*[\'"][^\'"]*(?:%s|\$\d+)[^\'"]*[\'"],\s*[\[\(]',
+        re.IGNORECASE,
+    )
+    _PARAMETERIZED_SQL2 = re.compile(
+        r'(?:execute|query)\s*\(\s*[\'"][^\'"]*\?[^\'"]*[\'"],\s*[\[\(]',
+        re.IGNORECASE,
+    )
     _SUBPROCESS_LIST    = re.compile(r'subprocess\.(?:run|Popen|call|check_output)\s*\(\s*\[', re.IGNORECASE)
     _EXECFILE_ARRAY     = re.compile(r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', re.IGNORECASE)
     _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
+    # Static template: render_template_string('<literal>', keyword=args) — safe with Jinja2 autoescape
     _STATIC_TEMPLATE    = re.compile(r"render_template_string\s*\(\s*['\"]", re.IGNORECASE)
     _ALLOWLIST_CHECK    = re.compile(r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse)\s*\(', re.IGNORECASE)
+    # Path traversal sanitization: normpath + startswith prefix check
+    _PATH_NORMPATH_SAFE = re.compile(r'os\.path\.normpath|path\.normalize', re.IGNORECASE)
+    _PATH_STARTSWITH    = re.compile(r'startswith\s*\(', re.IGNORECASE)
 
     _SAFE_RULES_PATTERNS: dict = {}  # populated lazily per rule_id
 
@@ -298,13 +309,16 @@ class SliceClassifier:
         """Return True when the code snippet contains a definitively safe pattern."""
         if self._DEFUSEDXML.search(code):
             return True
-        if rule_id in ("SQL_INJECTION", "NOSQL_INJECTION"):
+        if rule_id in ("SQL_INJECTION", "NOSQL_INJECTION", "BROKEN_ACCESS_CONTROL"):
             if self._PARAMETERIZED_SQL.search(code) or self._PARAMETERIZED_SQL2.search(code):
                 return True
         if rule_id == "COMMAND_INJECTION":
             if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
                 return True
-        if rule_id == "TEMPLATE_INJECTION":
+        if rule_id == "PATH_TRAVERSAL":
+            if self._PATH_NORMPATH_SAFE.search(code) and self._PATH_STARTSWITH.search(code):
+                return True
+        if rule_id in ("TEMPLATE_INJECTION", "XSS"):
             if self._STATIC_TEMPLATE.search(code):
                 return True
         if rule_id in ("SSRF", "UNVALIDATED_REDIRECT"):
