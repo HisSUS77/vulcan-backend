@@ -312,7 +312,7 @@ class SliceClassifier:
         if rule_id in ("SQL_INJECTION", "NOSQL_INJECTION", "BROKEN_ACCESS_CONTROL"):
             if self._PARAMETERIZED_SQL.search(code) or self._PARAMETERIZED_SQL2.search(code):
                 return True
-        if rule_id == "COMMAND_INJECTION":
+        if rule_id in ("COMMAND_INJECTION", "CODE_INJECTION"):
             if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
                 return True
         if rule_id == "PATH_TRAVERSAL":

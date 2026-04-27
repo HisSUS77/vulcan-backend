@@ -70,7 +70,8 @@
       "['\"](?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*%[sd][^'\"]*['\"][^\\n]*%\\s*(?:[a-zA-Z_(]|\\()",
       "`(?:SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^}]+\\}[^`]*`",
       "\\.raw\\s*\\(\\s*(?:f['\"]|[a-zA-Z_]\\w*\\s*(?:\\+|%|\\.))",
-      "text\\s*\\(\\s*(?:f['\"]|[^'\"\\s\\)][^)]*(?:\\+|\\{))"
+      "text\\s*\\(\\s*(?:f['\"]|[^'\"\\s\\)][^)]*(?:\\+|\\{))",
+      "(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\.format\\s*\\([^)]*[a-zA-Z_]"
     ]
   },
   "COMMAND_INJECTION": {
@@ -126,7 +127,9 @@
       "commands\\.getstatusoutput\\s*\\(",
       "child_process\\.exec\\s*\\(",
       "child_process\\.execSync\\s*\\(",
-      "execSync\\s*\\([^)]*(?:req\\.|request\\.)"
+      "execSync\\s*\\([^)]*(?:req\\.|request\\.)",
+      "spawn\\s*\\([^)]*(?:\\+[^)]*[a-zA-Z_]|(?<!['\\\"])\\b[a-zA-Z_]\\w*\\s*,)[^)]*shell\\s*:\\s*true",
+      "execSync\\s*\\(\\s*(?!['\\\"`])(?!timeout\\b)(?!options\\b)[a-zA-Z_]\\w*\\s*[).]"
     ]
   },
   "CODE_INJECTION": {
@@ -347,7 +350,8 @@
       "(?![\\s\\S]{0,600}(?:ALLOWED\\w*\\.has|allowedHosts|allowlist|validateUrl))req\\.(?:query|body|params)\\.(?:url|URL|callback|target|redirect|hook|endpoint)[\\s\\S]{0,400}(?:axios\\.(?:get|post)|fetch\\s*\\(|http\\.(?:get|request)|https\\.(?:get|request))",
       "urllib\\.request\\.urlopen\\s*\\([a-zA-Z_]",
       "httpx\\.(get|post)\\s*\\([a-zA-Z_][^)]*url[^)]*\\)",
-      "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains|ALLOWED))"
+      "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains|ALLOWED))",
+      "httpx\\.AsyncClient[\\s\\S]{0,500}client\\.(get|post|put|delete|request)\\s*\\(\\s*[a-zA-Z_]"
     ]
   },
   "BROKEN_ACCESS_CONTROL": {
