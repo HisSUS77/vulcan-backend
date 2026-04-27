@@ -64,7 +64,13 @@
       "cur\\.execute\\s*\\(\\s*f",
       "db\\.execute\\s*\\([^)]*\\+",
       "SELECT.*WHERE.*\\+",
-      "\\.execute\\s*\\(f['\\\"]"
+      "\\.execute\\s*\\(f['\\\"]",
+      "f['\"][^\\n]*(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\{[^}]+\\}",
+      "['\"](?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*(?:\\{\\}|\\{\\d+\\}|\\{\\w+\\})[^'\"]*['\"]",
+      "['\"](?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*%[sd][^'\"]*['\"][^\\n]*%\\s*(?:[a-zA-Z_(]|\\()",
+      "`(?:SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^}]+\\}[^`]*`",
+      "\\.raw\\s*\\(\\s*(?:f['\"]|[a-zA-Z_]\\w*\\s*(?:\\+|%|\\.))",
+      "text\\s*\\(\\s*(?:f['\"]|[^'\"\\s\\)][^)]*(?:\\+|\\{))"
     ]
   },
   "COMMAND_INJECTION": {
@@ -113,13 +119,14 @@
     ],
     "confidence": "high",
     "regex_patterns": [
-      "os\\.system\\s*\\(",
-      "os\\.popen\\s*\\(",
-      "shell\\s*=\\s*True",
+      "os\\.system\\s*\\((?![^)]*shlex\\.quote)",
+      "os\\.popen\\s*\\((?![^)]*shlex\\.quote)",
+      "[^\\n]*(?:\\+[^\\n]*[a-zA-Z_]|(?:request\\.|req\\.)[^\\n]*)shell\\s*[=:]\\s*[Tt]rue|shell\\s*[=:]\\s*[Tt]rue[^\\n]*(?:\\+[^\\n]*[a-zA-Z_]|request\\.|req\\.)",
       "commands\\.getoutput\\s*\\(",
       "commands\\.getstatusoutput\\s*\\(",
       "child_process\\.exec\\s*\\(",
-      "child_process\\.execSync\\s*\\("
+      "child_process\\.execSync\\s*\\(",
+      "execSync\\s*\\([^)]*(?:req\\.|request\\.)"
     ]
   },
   "CODE_INJECTION": {
@@ -163,9 +170,9 @@
     ],
     "confidence": "high",
     "regex_patterns": [
-      "eval\\s*\\(",
+      "(?<![a-zA-Z0-9_.])(?<!literal_)eval\\s*\\(",
       "(?<![a-zA-Z0-9_])exec\\s*\\(",
-      "(?<![a-zA-Z0-9_])execfile\\s*\\(",
+      "(?<![a-zA-Z0-9_])execfile\\s*\\((?![^,)]*['\"][^,)]*,\\s*\\[)",
       "__import__\\s*\\("
     ]
   },
@@ -217,7 +224,8 @@
       "\\.outerHTML\\s*=",
       "document\\.write\\s*\\(",
       "dangerouslySetInnerHTML",
-      "render_template_string\\s*\\("
+      "render_template_string\\s*\\(\\s*(?:[^'\"\\s\\)])",
+      "Markup\\s*\\([^)]*(?:f['\"]|request\\.|req\\.|\\+)"
     ]
   },
   "PATH_TRAVERSAL": {
@@ -272,7 +280,12 @@
       "pathlib\\.Path\\s*\\([^)]*\\+",
       "send_file\\s*\\([^)]*(?:request\\.args|request\\.form|request\\.get|request\\.values)",
       "res\\.sendFile\\s*\\([^)]*(?:req\\.(?:query|params|body))",
-      "path\\.join\\s*\\([^)]*req\\.(?:query|params|body)"
+      "path\\.join\\s*\\([^)]*req\\.(?:query|params|body)",
+      "send_file\\s*\\(\\s*[^'\"\\s\\)][^)]*\\)",
+      "(?:res\\.)?sendFile\\s*\\([^)]*(?:\\+|req\\.(?:query|params|body))",
+      "(?:fs\\.)?readFileSync?\\s*\\([^)]*(?:\\+[^)]*|req\\.(?:query|params|body))",
+      "pathlib\\.Path\\s*\\([^)]*\\)\\s*/\\s*[a-zA-Z_]",
+      "open\\s*\\([^)]*\\+[^)]*(?:request\\.|req\\.|filename|file\\b|fname|path)"
     ]
   },
   "SSRF": {
@@ -326,7 +339,12 @@
     "regex_patterns": [
       "requests\\.(get|post|put|delete|request)\\s*\\([^)]*(?:request\\.|req\\.)",
       "urllib\\.request\\.urlopen\\s*\\([^)]*(?:request\\.|req\\.)",
-      "httpx\\.(get|post)\\s*\\([^)]*(?:request\\.|req\\.)"
+      "httpx\\.(get|post)\\s*\\([^)]*(?:request\\.|req\\.)",
+      "request\\.(?:args|form|json|get_json)(?:\\.get)?\\s*\\(['\"](?:url|URL|callback|target|redirect|hook|endpoint|src|href)['\"]\\)[\\s\\S]{0,400}(?:requests?\\.(get|post)|urlopen|httpx\\.(?:get|post)|axios\\.(?:get|post)|fetch)\\s*\\(",
+      "req\\.(?:query|body|params)\\.(?:url|URL|callback|target|redirect|hook|endpoint)[\\s\\S]{0,400}(?:axios\\.(?:get|post)|fetch\\s*\\(|http\\.(?:get|request)|https\\.(?:get|request))",
+      "urllib\\.request\\.urlopen\\s*\\([a-zA-Z_]",
+      "httpx\\.(get|post)\\s*\\([a-zA-Z_][^)]*url[^)]*\\)",
+      "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains))"
     ]
   },
   "BROKEN_ACCESS_CONTROL": {
@@ -370,8 +388,10 @@
       "(?i)user_id\\s*=\\s*request\\.(args|form|json|get_json)\\b",
       "(?i)user_id\\s*=\\s*req\\.(params|query|body)",
       "(?i)account_id\\s*=\\s*request\\.(args|form|json)",
-      "(?i)\\.get\\s*\\(['\"]user_id['\"]\\)(?!.*g\\.user_id)",
-      "(?i)\\.get\\s*\\(['\"]id['\"]\\)(?!.*g\\.user_id)"
+      "(?i)\\.get\\s*\\(['\"]user_id['\"]\\)(?!.*(?:g\\.user_id|session\\.user_id|current_user\\.id))",
+      "(?i)\\.get\\s*\\(['\"]id['\"]\\)(?![\\s\\S]{0,500}(?:g\\.user_id|session\\.user_id|current_user\\.id|execute[^)]*(?:%s|%d|\\?)|query[^)]*(?:%s|%d|\\?)))",
+      "findById\\s*\\([^)]*req\\.(?:params|query|body)",
+      "findOne\\s*\\(\\{[^}]*(?:req\\.|request\\.)(?:params|query|body)"
     ],
     "confidence": "medium"
   },
@@ -752,7 +772,7 @@
     "sanitizers": [],
     "confidence": "high",
     "regex_patterns": [
-      "eval\\s*\\(",
+      "(?<![a-zA-Z0-9_.])(?<!literal_)eval\\s*\\(",
       "new\\s+Function\\s*\\("
     ]
   },
@@ -791,9 +811,10 @@
     ],
     "confidence": "high",
     "regex_patterns": [
-      "render_template_string\\s*\\(",
+      "render_template_string\\s*\\(\\s*(?:[^'\"\\s\\)])",
       "jinja2\\.Template\\s*\\(",
-      "Environment\\s*\\(.*\\)\\.from_string\\s*\\("
+      "\\.from_string\\s*\\(\\s*[^'\"\\s\\)]",
+      "Template\\s*\\(\\s*[a-zA-Z_]"
     ]
   },
   "NOSQL_INJECTION": {
@@ -907,7 +928,11 @@
     "regex_patterns": [
       "res\\.redirect\\s*\\([^)]*(?:req\\.(?:query|params|body))",
       "location\\.href\\s*=\\s*[^;]*(?:req\\.|request\\.)",
-      "redirect\\s*\\([^)]*(?:request\\.args|request\\.form)"
+      "redirect\\s*\\([^)]*(?:request\\.args|request\\.form)",
+      "redirect\\s*\\([^)]*(?:next|url|return|redirect|location|dest|target|returnUrl|goto)[^)]*\\)(?![^)]*(?:is_safe_url|urlparse|validate))",
+      "res\\.redirect\\s*\\(\\s*[^'\"\\s\\)][^)]*\\)(?![^)]*(?:is_safe_url|urlparse|validate))",
+      "window\\.location(?:\\.href)?\\s*=\\s*[a-zA-Z_]\\w*",
+      "(?![\\.\\s\\S]{0,800}(?:urlparse|is_safe_url|validateRedirect|ALLOWED\\.has|allowlist))request\\.(?:args|form|get_json)(?:\\.get)?\\s*\\(['\"](?:next|url|redirect|return|returnUrl|goto|back|target)['\"]\\)[\\s\\S]{0,300}(?:redirect\\s*\\(|window\\.location|res\\.redirect)"
     ]
   },
   "JWT_WEAK_SECRET": {
@@ -1084,9 +1109,9 @@
     ],
     "confidence": "low",
     "regex_patterns": [
-      "(?:logging|logger)\\.(info|debug|warning|error|critical)\\s*\\(",
-      "(?<![a-zA-Z_.])print\\s*\\(",
-      "console\\.(log|error|warn)\\s*\\("
+      "(?:logging|logger)\\.(info|debug|warning|error|critical)\\s*\\([^\\n]*(?:request\\.(?:args|form|json|data|headers)|req\\.(?:query|body|params|headers)|sys\\.argv\\[|%[sd][^\\n]*(?:request\\.|req\\.)|f['\"][^\\n]*request\\.(?:args|form|json|headers))",
+      "(?<![a-zA-Z_.])print\\s*\\([^\\n]*(?:request\\.(?:args|form|json)|req\\.(?:query|body|params)|sys\\.argv\\s*\\[)",
+      "console\\.(log|error|warn)\\s*\\([^\\n]*(?:req\\.(?:query|body|params|headers)|request\\.(?:args|form|json))"
     ]
   },
   "UNRESTRICTED_FILE_UPLOAD": {
@@ -1141,8 +1166,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "set_cookie\\((?![^\\n]*secure\\s*=\\s*True)[^)]*\\)",
-      "res\\.cookie\\((?![^\\n]*secure\\s*:\\s*true)[^)]*\\)"
+      "set_cookie\\((?![^)]*secure\\s*=\\s*True)[^)]*\\)",
+      "res\\.cookie\\((?![^)]*(?:secure\\s*:\\s*true|secure\\s*=\\s*True))[^)]*\\)"
     ],
     "sanitizers": [
       "secure=True",
@@ -1304,7 +1329,10 @@
     "confidence": "low",
     "regex_patterns": [
       "new RegExp\\s*\\([^)]*(?:req\\.|request\\.)",
-      "\\.test\\s*\\([^)]*(?:req\\.|request\\.)"
+      "\\.test\\s*\\([^)]*(?:req\\.|request\\.)",
+      "re\\.(?:match|search|fullmatch)\\s*\\([^,]+,\\s*(?:request\\.(?:args|form|json|get_json)|req\\.(?:query|params|body))",
+      "request\\.(?:args|form)(?:\\.get\\s*\\([^)]+\\)|\\.[a-zA-Z_]+)[\\s\\S]{0,200}re\\.(?:match|search|fullmatch)\\s*\\(",
+      "\\.test\\s*\\((?:req\\.|request\\.|[a-zA-Z_]\\w*(?:input|data|query|search|term))"
     ]
   },
   "INFORMATION_EXPOSURE_ERROR": {
@@ -1759,8 +1787,8 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "(?i)(?:logger\\.|logging\\.)\\w+\\([^\\n]*(password|token|secret)",
-      "(?i)console\\.(log|error|warn)\\([^\\n]*(password|token|secret)"
+      "(?i)(?:logger\\.|logging\\.)\\w+\\([^\\n]*(password|token|secret)(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash|sanitize))",
+      "(?i)console\\.(log|error|warn)\\([^\\n]*(password|token|secret)(?![^\\n]*(?:REDACT|redact|\\*{2,}|\\[hidden\\]|mask|hash))"
     ],
     "file_patterns": [
       "(?i)\\.(py|js|ts|tsx)$"
