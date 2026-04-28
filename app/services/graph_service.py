@@ -64,11 +64,38 @@ class GraphService:
         file_info = None
         if isinstance(graph_data, dict) and "files" in graph_data:
             files = graph_data.get("files") or {}
-            file_order = graph_data.get("file_order") or list(files.keys())
-            file_map = graph_data.get("file_map") or {}
+            file_order = list(graph_data.get("file_order") or files.keys())
+            file_map = dict(graph_data.get("file_map") or {})
+
+            # Supplement file list with any files found in vulnerabilities
+            # (e.g. Pipfile, requirements.txt, .npmrc that _collect_source_files skips)
+            vuln_path_set = set(file_map.values())
+            for vuln in ((scan.get("summary") or {}).get("vulnerabilities") or []):
+                fpath = ((vuln.get("location") or {}).get("file") or "").strip()
+                if fpath and fpath not in vuln_path_set:
+                    vuln_path_set.add(fpath)
+                    vid = f"vfile-{len(file_order)}"
+                    file_map[vid] = fpath
+                    file_order.append(vid)
+
+            available = [{"id": k, "path": file_map.get(k)} for k in file_order]
+
+            # Requested file is a supplemented (non-source) file — no graph data
+            if file_id in file_map and file_id not in files:
+                return {
+                    "type": gtype.upper(),
+                    "nodes": [],
+                    "edges": [],
+                    "meta": {"total_nodes": 0, "total_edges": 0},
+                    "file": {
+                        "file_id": file_id,
+                        "file_path": file_map[file_id],
+                        "available_files": available,
+                    },
+                    "detail": "No graph data for this file type — AST/CPG graphs are only generated for source code files.",
+                }
+
             target_id = file_id if file_id in files else None
-            if not target_id and file_id == "main" and file_order:
-                target_id = file_order[0]
             if not target_id and file_order:
                 target_id = file_order[0]
             if target_id:
@@ -76,9 +103,7 @@ class GraphService:
                 file_info = {
                     "file_id": target_id,
                     "file_path": file_map.get(target_id),
-                    "available_files": [
-                        {"id": key, "path": file_map.get(key)} for key in file_order
-                    ],
+                    "available_files": available,
                 }
             else:
                 selected_graph = None

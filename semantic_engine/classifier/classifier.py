@@ -418,16 +418,11 @@ _classifier_instance: Optional[SliceClassifier] = None
 def get_classifier(enable_llm: bool = True) -> SliceClassifier:
     """
     Get global classifier instance (singleton).
-    
-    Args:
-        enable_llm: Whether to enable LLM classification
-    
-    Returns:
-        SliceClassifier instance
+    Re-creates if enable_llm flag differs from the existing instance.
     """
     global _classifier_instance
-    
-    if _classifier_instance is None:
+
+    if _classifier_instance is None or _classifier_instance.enable_llm != enable_llm:
         _classifier_instance = SliceClassifier(enable_llm)
-    
+
     return _classifier_instance

@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.deps import get_current_user
 from app.db.mongo import get_mongo_db
+from app.core.permissions import can_access_resource
+from app.core.exceptions import AuthorizationException
 
 router = APIRouter(prefix="/attack-surface", tags=["attack-surface"])
 
@@ -62,6 +64,8 @@ async def get_attack_surface(
     scan = await db.scans.find_one({"scan_id": scan_id})
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    if not can_access_resource(user, str(scan.get("user_id"))):
+        raise AuthorizationException(f"Not authorized to access scan {scan_id}")
 
     summary   = scan.get("summary") or {}
     all_vulns = summary.get("vulnerabilities") or []

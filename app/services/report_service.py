@@ -138,22 +138,27 @@ class ReportService:
             "duration_seconds": summary.duration_seconds,
         }
 
+    @staticmethod
+    def _xe(text) -> str:
+        """Escape XML special chars for use inside Paragraph markup."""
+        return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
     async def export_pdf(self, scan_id: str, user: dict) -> Optional[bytes]:
         """Generate PDF report for a scan"""
         if not REPORTLAB_AVAILABLE:
             logger.error("reportlab not available. Install it with: pip install reportlab")
             return None
-        
+
         summary = await self._get_summary(scan_id, user)
         if not summary:
             return None
-        
+
         try:
             buffer = BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
             story = []
             styles = getSampleStyleSheet()
-            
+
             # Custom styles
             title_style = ParagraphStyle(
                 'CustomTitle',
@@ -162,7 +167,17 @@ class ReportService:
                 textColor=colors.HexColor('#1a1a1a'),
                 spaceAfter=30,
             )
-            
+
+            sub_heading_style = ParagraphStyle(
+                'SubHeading',
+                parent=styles['Normal'],
+                fontSize=11,
+                textColor=colors.HexColor('#333333'),
+                spaceAfter=6,
+                spaceBefore=6,
+                fontName='Helvetica-Bold',
+            )
+
             # Add Heading4 style if not exists
             if 'Heading4' not in styles:
                 styles.add(ParagraphStyle(
@@ -173,22 +188,22 @@ class ReportService:
                     spaceAfter=6,
                     spaceBefore=6,
                 ))
-            
+
             # Title
             story.append(Paragraph("Vulnerability Scan Report", title_style))
             story.append(Spacer(1, 0.2 * inch))
-            
+
             # Scan Info
             info_data = [
                 ['Scan ID:', scan_id],
-                ['Status:', summary.status],
-                ['Input Type:', summary.input_type],
+                ['Status:', str(summary.status or 'N/A')],
+                ['Input Type:', str(summary.input_type or 'N/A')],
                 ['Files Scanned:', f"{summary.files_scanned} / {summary.total_files}"],
                 ['Duration:', f"{summary.duration_seconds}s"],
-                ['Created:', summary.created_at],
-                ['Completed:', summary.completed_at or 'N/A'],
+                ['Created:', str(summary.created_at or 'N/A')],
+                ['Completed:', str(summary.completed_at or 'N/A')],
             ]
-            
+
             info_table = Table(info_data, colWidths=[2*inch, 4*inch])
             info_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (0, -1), colors.grey),
@@ -201,11 +216,11 @@ class ReportService:
             ]))
             story.append(info_table)
             story.append(Spacer(1, 0.3 * inch))
-            
+
             # Severity Summary
             story.append(Paragraph("Vulnerability Summary", styles['Heading2']))
             story.append(Spacer(1, 0.1 * inch))
-            
+
             severity_data = [
                 ['Severity', 'Count'],
                 ['Critical', str(summary.by_severity.get('critical', 0))],
@@ -214,7 +229,7 @@ class ReportService:
                 ['Low', str(summary.by_severity.get('low', 0))],
                 ['Total', str(summary.vulnerabilities_found)],
             ]
-            
+
             severity_table = Table(severity_data, colWidths=[3*inch, 2*inch])
             severity_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
@@ -228,59 +243,65 @@ class ReportService:
             ]))
             story.append(severity_table)
             story.append(Spacer(1, 0.3 * inch))
-            
+
             # Vulnerabilities Details
             if summary.vulnerabilities:
                 story.append(Paragraph("Vulnerability Details", styles['Heading2']))
                 story.append(Spacer(1, 0.1 * inch))
-                
-                for idx, vuln in enumerate(summary.vulnerabilities[:20], 1):  # Limit to 20
+
+                xe = self._xe  # shorthand
+
+                for idx, vuln in enumerate(summary.vulnerabilities, 1):
                     # Title with severity
-                    vuln_type = vuln.get('type', 'Unknown Vulnerability')
-                    severity = vuln.get('severity', 'unknown').upper()
+                    vuln_type = xe(vuln.get('type', 'Unknown Vulnerability'))
+                    severity = xe(vuln.get('severity', 'unknown').upper())
                     vuln_title = f"{idx}. {vuln_type} - {severity}"
                     story.append(Paragraph(vuln_title, styles['Heading3']))
-                    
+
                     # Basic info
-                    location = vuln.get('location', {})
-                    file_path = location.get('file', 'N/A')
-                    start_line = location.get('start_line', 'N/A')
-                    end_line = location.get('end_line', 'N/A')
-                    
+                    location = vuln.get('location', {}) or {}
+                    file_path = xe(location.get('file', 'N/A'))
+                    start_line = xe(location.get('start_line', 'N/A'))
+                    end_line = xe(location.get('end_line', 'N/A'))
+                    confidence_val = vuln.get('confidence', 0) or 0
+                    try:
+                        confidence_pct = f"{float(confidence_val) * 100:.0f}%"
+                    except (TypeError, ValueError):
+                        confidence_pct = str(confidence_val)
+
                     info_text = f"<b>Location:</b> {file_path} (Lines {start_line}-{end_line})<br/>"
-                    info_text += f"<b>CWE:</b> {vuln.get('cwe', 'N/A')}<br/>"
-                    info_text += f"<b>OWASP:</b> {vuln.get('owasp', 'N/A')}<br/>"
-                    info_text += f"<b>Confidence:</b> {vuln.get('confidence', 0) * 100:.0f}%<br/>"
+                    info_text += f"<b>CWE:</b> {xe(vuln.get('cwe', 'N/A'))}<br/>"
+                    info_text += f"<b>OWASP:</b> {xe(vuln.get('owasp', 'N/A'))}<br/>"
+                    info_text += f"<b>Confidence:</b> {confidence_pct}<br/>"
                     story.append(Paragraph(info_text, styles['Normal']))
                     story.append(Spacer(1, 0.1 * inch))
-                    
+
                     # Data Flow Analysis
-                    evidence = vuln.get('evidence', {})
+                    evidence = vuln.get('evidence', {}) or {}
                     if evidence:
-                        story.append(Paragraph("<b>🔍 Data Flow Analysis</b>", styles['Heading4']))
-                        flow_text = f"<b>Source:</b> {evidence.get('source', 'N/A')}<br/>"
-                        flow_text += f"<b>Sink:</b> {evidence.get('sink', 'N/A')}<br/>"
-                        flow_text += f"<b>Pattern:</b> {evidence.get('pattern', 'N/A')}<br/>"
+                        story.append(Paragraph("<b>Data Flow Analysis</b>", sub_heading_style))
+                        flow_text = f"<b>Source:</b> {xe(evidence.get('source', 'N/A'))}<br/>"
+                        flow_text += f"<b>Sink:</b> {xe(evidence.get('sink', 'N/A'))}<br/>"
+                        flow_text += f"<b>Pattern:</b> {xe(evidence.get('pattern', 'N/A'))}<br/>"
                         story.append(Paragraph(flow_text, styles['Normal']))
                         story.append(Spacer(1, 0.1 * inch))
-                    
+
                     # Static Detection
-                    analysis = vuln.get('analysis', {})
-                    static_detection = analysis.get('static_detection', {})
+                    analysis = vuln.get('analysis', {}) or {}
+                    static_detection = analysis.get('static_detection', {}) or {}
                     if static_detection and static_detection.get('reason'):
-                        story.append(Paragraph("<b>⚡ Static Detection</b>", styles['Heading4']))
-                        detection_text = static_detection.get('reason', 'No details available')
+                        story.append(Paragraph("<b>Static Detection</b>", sub_heading_style))
+                        detection_text = xe(static_detection.get('reason', 'No details available'))
                         story.append(Paragraph(detection_text, styles['Normal']))
                         story.append(Spacer(1, 0.1 * inch))
-                    
+
                     # Code Snippet
                     code_snippet = evidence.get('code_snippet')
                     if code_snippet:
-                        story.append(Paragraph("<b>📄 Vulnerable Code</b>", styles['Heading4']))
-                        
-                        # Create a proper code style for Preformatted text
+                        story.append(Paragraph("<b>Vulnerable Code</b>", sub_heading_style))
+
                         code_style = ParagraphStyle(
-                            'CodeBlock',
+                            f'CodeBlock_{idx}',
                             parent=styles['Code'],
                             fontSize=8,
                             fontName='Courier',
@@ -288,51 +309,48 @@ class ReportService:
                             rightIndent=20,
                             backColor=colors.HexColor('#f5f5f5'),
                             borderPadding=10,
-                            leading=12,  # Line spacing
+                            leading=12,
                             spaceBefore=6,
                             spaceAfter=6,
                         )
-                        
-                        # Use Preformatted to preserve line breaks and spacing
-                        # Don't escape HTML entities for Preformatted
-                        story.append(Preformatted(code_snippet, code_style))
+
+                        # Preformatted doesn't parse XML — safe for raw code
+                        # Truncate very long snippets to avoid layout issues
+                        snippet_text = code_snippet[:2000] if len(code_snippet) > 2000 else code_snippet
+                        story.append(Preformatted(snippet_text, code_style))
                         story.append(Spacer(1, 0.1 * inch))
-                    
+
                     # AI Analysis
-                    llm_classification = analysis.get('llm_classification', {})
+                    llm_classification = analysis.get('llm_classification', {}) or {}
                     if llm_classification:
-                        story.append(Paragraph("<b>🤖 AI Analysis</b>", styles['Heading4']))
-                        
-                        # Explanation
+                        story.append(Paragraph("<b>AI Analysis</b>", sub_heading_style))
+
                         explanation = llm_classification.get('explanation', '')
                         if explanation:
-                            story.append(Paragraph(f"<b>Analysis:</b> {explanation}", styles['Normal']))
+                            story.append(Paragraph(f"<b>Analysis:</b> {xe(explanation)}", styles['Normal']))
                             story.append(Spacer(1, 0.05 * inch))
-                        
-                        # Remediation
+
                         remediation = llm_classification.get('remediation', '')
                         if remediation:
-                            story.append(Paragraph("<b>✅ Recommended Fix</b>", styles['Heading4']))
-                            story.append(Paragraph(remediation, styles['Normal']))
-                        
-                        # Exploitability
+                            story.append(Paragraph("<b>Recommended Fix</b>", sub_heading_style))
+                            story.append(Paragraph(xe(remediation), styles['Normal']))
+
                         exploitability = llm_classification.get('exploitability', 0)
                         if exploitability:
-                            story.append(Paragraph(f"<b>Exploitability:</b> {exploitability * 100:.0f}%", styles['Normal']))
-                    
+                            try:
+                                expl_pct = f"{float(exploitability) * 100:.0f}%"
+                            except (TypeError, ValueError):
+                                expl_pct = str(exploitability)
+                            story.append(Paragraph(f"<b>Exploitability:</b> {expl_pct}", styles['Normal']))
+
                     story.append(Spacer(1, 0.3 * inch))
-                
-                if len(summary.vulnerabilities) > 20:
-                    story.append(Paragraph(
-                        f"<i>... and {len(summary.vulnerabilities) - 20} more vulnerabilities</i>",
-                        styles['Italic']
-                    ))
-            
+
+
             # Build PDF
             doc.build(story)
             buffer.seek(0)
             return buffer.getvalue()
-            
+
         except Exception as e:
             logger.error(f"Failed to generate PDF: {e}", exc_info=True)
             return None
