@@ -100,6 +100,7 @@ _CHAIN_TEMPLATES = [
 ]
 
 
+# Looks up the MITRE ATT&CK stage for a vulnerability type string using keyword matching
 def _map_stage(vuln_type: str) -> str:
     t = (vuln_type or "").lower()
     for key, stage in _VULN_TO_STAGE.items():
@@ -108,6 +109,7 @@ def _map_stage(vuln_type: str) -> str:
     return "reconnaissance"
 
 
+# Computes 0–100 blast radius score from stage breadth, severity weights, and execution bonus
 def _blast_radius(stage_vulns: dict, all_vulns: list) -> int:
     stages_hit  = len([s for s, v in stage_vulns.items() if v])
     breadth     = min(stages_hit / 8 * 40, 40)
@@ -117,6 +119,7 @@ def _blast_radius(stage_vulns: dict, all_vulns: list) -> int:
     return min(int(breadth + sev_score + exec_bonus), 100)
 
 
+# Finds matching attack chain templates from active stages and returns top 4 by probability
 def _kill_chains(stage_vulns: dict) -> list:
     active = {s for s, v in stage_vulns.items() if v}
     result = []
@@ -135,6 +138,7 @@ def _kill_chains(stage_vulns: dict) -> list:
     return result[:4]
 
 
+# Builds a human-readable attack narrative sentence describing the active kill chain stages
 def _narrative(stage_vulns: dict, blast_radius: int) -> str:
     if not any(stage_vulns.values()):
         return "No exploitable vulnerabilities detected. The application appears secure against known attack patterns."
@@ -162,6 +166,7 @@ def _narrative(stage_vulns: dict, blast_radius: int) -> str:
     return f"Blast Radius {blast_radius}/100 — {chain}"
 
 
+# Returns the highest severity level present in a vulnerability list
 def _risk_level(vulns: list) -> str:
     for sev in ["critical", "high", "medium", "low"]:
         if any((v.get("severity") or "").lower() == sev for v in vulns):
@@ -169,6 +174,7 @@ def _risk_level(vulns: list) -> str:
     return "none" if not vulns else "low"
 
 
+# API endpoint — loads scan, checks ownership, maps vulns to ATT&CK stages, returns kill chain data
 @router.get("/{scan_id}")
 async def get_kill_chain(
     scan_id: str,

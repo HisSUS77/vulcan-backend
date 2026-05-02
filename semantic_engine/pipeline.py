@@ -278,6 +278,7 @@ class SemanticPipeline:
         
         return all_slices
 
+    # Runs PathDiscovery to find broad source→sink path candidates across the graph
     async def _discover_paths(
         self,
         graph: SemanticGraph,

@@ -20,6 +20,7 @@ SECRET_PATTERNS = [
 ]
 
 
+# Raise RateLimitException if the user has exceeded the hourly patch generation limit.
 async def enforce_rate_limit(db: AsyncIOMotorDatabase, user_id: str) -> None:
     repo = PatchRepository(db)
     record = await repo.increment_rate_limit(user_id, MAX_PATCHES_PER_HOUR, 3600)
@@ -27,12 +28,14 @@ async def enforce_rate_limit(db: AsyncIOMotorDatabase, user_id: str) -> None:
         raise RateLimitException("Patch generation rate limit exceeded")
 
 
+# Raise ValidationException if the code slice exceeds the maximum allowed line count.
 def enforce_slice_length(vulnerable_slice: str) -> None:
     lines = vulnerable_slice.splitlines()
     if len(lines) > MAX_SLICE_LINES:
         raise ValidationException("Code slice too large for patch generation")
 
 
+# Raise ValidationException if the code slice contains detectable secrets or private keys.
 def reject_secrets(vulnerable_slice: str) -> None:
     for pattern in SECRET_PATTERNS:
         if pattern.search(vulnerable_slice):

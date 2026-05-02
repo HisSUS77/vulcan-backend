@@ -8,6 +8,7 @@ class LLMReasoning:
     For MVP, uses rule-based heuristics. Can integrate with OpenAI/Anthropic later.
     """
     
+    # Store the optional API key and set a flag to switch between LLM and heuristic analysis.
     def __init__(self, llm_api_key: Optional[str] = None):
         self.llm_api_key = llm_api_key
         self.use_llm = bool(llm_api_key)
@@ -123,6 +124,7 @@ class LLMReasoning:
             recommended_fix=None
         )
     
+    # Produce a textual fix suggestion annotated with the vulnerable code snippet, or empty string if not a real vulnerability.
     def generate_patch(self, candidate: VulnerabilityCandidate, analysis: LLMAnalysisResult) -> str:
         """
         Generate a code patch to fix the vulnerability.

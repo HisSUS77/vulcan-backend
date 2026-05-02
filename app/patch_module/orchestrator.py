@@ -33,6 +33,7 @@ class PatchOrchestrator:
         self.llm = PatchLLMService()
         self.validator = PatchValidator()
 
+    # Runs the full patch generation loop (CoT prompt → validate → critique retry → persist → return)
     async def generate(
         self,
         user_id: str,
@@ -212,6 +213,7 @@ class PatchOrchestrator:
             version=version,
         )
 
+    # Re-runs the full validation pipeline on an existing patch and persists updated results
     async def validate(self, patch_id: str) -> PatchValidateResponse:
         # Re-run validators on an existing patch and update its status.
         patch = await self.repo.get_patch(patch_id)
@@ -243,6 +245,7 @@ class PatchOrchestrator:
         await self._sync_patch_to_scan(ctx.vulnerability_id, patch_id, status, patch.get("confidence"), validations)
         return PatchValidateResponse(patch_id=patch_id, validations=validations, status=status)
 
+    # Creates a pending-apply record and marks the patch as awaiting deployment
     async def apply(self, patch_id: str, user_id: str, repo_id: Optional[str]) -> PatchApplyResponse:
         # Create a "pending apply" record; actual repo changes are external.
         patch = await self.repo.get_patch(patch_id)
@@ -271,6 +274,7 @@ class PatchOrchestrator:
             instructions="Create a branch, apply the patch file, run tests, then open a PR.",
         )
 
+    # Returns the unified diff string for a patch by ID
     async def export(self, patch_id: str) -> str:
         # Return the unified diff for download/export.
         patch = await self.repo.get_patch(patch_id)
@@ -421,6 +425,7 @@ class PatchOrchestrator:
             for p in patches_sorted
         ]
 
+    # Delegates to PatchValidator.validate() and returns the list of ValidationResult
     def _run_validations(self, ctx: VulnerabilityContext, unified_diff: str) -> List[ValidationResult]:
         # Wrapper to keep validation logic in PatchValidator.
         return self.validator.validate(ctx, unified_diff)
@@ -504,6 +509,7 @@ class PatchOrchestrator:
             "generation_attempts": generation_attempts,
         }
 
+    # Builds a human-readable validation summary string referencing CWE, OWASP, and taint path
     def _build_explanation(self, validations: List[ValidationResult], ctx: Optional[VulnerabilityContext] = None) -> str:
         # Human-readable summary for UI (FR-M6.5 — references CWE/OWASP).
         passed = [v.name for v in validations if v.passed]
@@ -520,6 +526,7 @@ class PatchOrchestrator:
             parts.append(f"Failed: {failed}. Manual review recommended.")
         return " ".join(parts)
 
+    # Fetches vulnerability context from the scan summary in MongoDB by vulnerability_id
     async def _load_context(self, user_id: str, vulnerability_id: Optional[str]) -> Optional[VulnerabilityContext]:
         # Load vulnerability context from scan summary by vulnerability_id.
         if not vulnerability_id:
@@ -548,6 +555,7 @@ class PatchOrchestrator:
                 )
         return None
 
+    # Updates patch status in both summary.vulnerabilities and top-level vulnerabilities arrays in MongoDB
     async def _sync_patch_to_scan(
         self,
         vulnerability_id: Optional[str],

@@ -24,6 +24,7 @@ class CandidatePath:
 
 
 class PathDiscovery:
+    # Stores BFS depth, candidate count, and score threshold config
     def __init__(
         self,
         max_depth: int = 50,
@@ -34,6 +35,7 @@ class PathDiscovery:
         self.max_candidates = max_candidates
         self.score_threshold = score_threshold
 
+    # Main entry — runs BFS from all sources to sinks, scores paths, emits CodeSlices
     def discover(
         self,
         graph: SemanticGraph,
@@ -89,6 +91,7 @@ class PathDiscovery:
 
         return slices
 
+    # Aggregates source/sink patterns from all query rules and graph metadata roles
     def _collect_patterns(
         self,
         graph: SemanticGraph,
@@ -122,6 +125,7 @@ class PathDiscovery:
 
         return sources, sinks, sanitizers
 
+    # Token-aware label matching to avoid partial-word false positives
     def _label_matches_pattern(self, label_lower: str, pattern_lower: str) -> bool:
         # Tokenize labels to avoid accidental substring matches (e.g., "getuser").
         if not pattern_lower:
@@ -145,6 +149,7 @@ class PathDiscovery:
 
         return pattern_lower in tokens
 
+    # Builds forward adjacency list restricted to data/taint edge types
     def _build_adjacency(self, graph: SemanticGraph) -> Tuple[Dict[str, List[str]], Dict[Tuple[str, str], List[EdgeType]]]:
         # Only traverse edges that plausibly carry data/taint.
         edge_types = {
@@ -167,6 +172,7 @@ class PathDiscovery:
                 adj.setdefault(edge.from_node, []).append(edge.to_node)
         return adj, edge_map
 
+    # BFS that finds all source→sink paths up to max depth and candidate count
     def _bfs_paths(
         self,
         source_id: str,
@@ -198,6 +204,7 @@ class PathDiscovery:
 
         return paths
 
+    # Returns True if a node matches any known sanitizer pattern
     def _is_sanitizer(self, node: GraphNode, sanitizers: Set[str]) -> bool:
         if not sanitizers:
             return False
@@ -213,6 +220,7 @@ class PathDiscovery:
                 return True
         return False
 
+    # Computes heuristic score for a path from IIS, proximity, boundaries, and auth gap
     def _score_path(
         self,
         node_map: Dict[str, GraphNode],
@@ -250,6 +258,7 @@ class PathDiscovery:
         )
         return score, reason
 
+    # Counts how many file and scope boundaries a path crosses
     def _boundary_crossings(self, node_map: Dict[str, GraphNode], path: List[str]) -> int:
         files = []
         scopes = []
@@ -266,6 +275,7 @@ class PathDiscovery:
         scope_cross = len(set([s for s in scopes if s])) - 1 if scopes else 0
         return max(0, file_cross) + max(0, scope_cross)
 
+    # Counts explicit and heuristic sanitizer nodes on the path
     def _sanitizer_hits(self, node_map: Dict[str, GraphNode], path: List[str], sanitizers: Set[str]) -> Tuple[int, int]:
         explicit_hits = 0
         heuristic_hits = 0
@@ -283,6 +293,7 @@ class PathDiscovery:
                 heuristic_hits += 1
         return explicit_hits, heuristic_hits
 
+    # Returns 0 if explicit sanitizer present, 0.4 if heuristic, 1.0 if none
     def _sanitization_ambiguity(self, explicit_hits: int, heuristic_hits: int) -> float:
         if explicit_hits:
             return 0.0
@@ -290,6 +301,7 @@ class PathDiscovery:
             return 0.4
         return 1.0
 
+    # Counts call-graph, HTTP-route, and auth-coverage edges on the path
     def _edge_features(self, edge_map: Dict[Tuple[str, str], List[EdgeType]], path: List[str]) -> Dict[str, int]:
         counts: Dict[str, int] = {
             "call_graph": 0,
@@ -307,6 +319,7 @@ class PathDiscovery:
                     counts["auth_coverage"] += 1
         return counts
 
+    # Estimates how exposed the sink is based on auth coverage and sink type
     def _auth_gap(self, node_map: Dict[str, GraphNode], edge_features: Dict[str, int], sink: GraphNode) -> float:
         if edge_features.get("auth_coverage"):
             return 0.2
@@ -316,6 +329,7 @@ class PathDiscovery:
             return 0.7
         return 0.5
 
+    # Maps numeric score to critical/high/medium/low severity string
     def _severity_from_score(self, score: float) -> str:
         if score >= 0.75:
             return "critical"
@@ -325,6 +339,7 @@ class PathDiscovery:
             return "medium"
         return "low"
 
+    # Extracts code snippet and location dict for path nodes with context lines
     def _extract_snippet(
         self,
         node_map: Dict[str, GraphNode],
@@ -381,6 +396,7 @@ class PathDiscovery:
             "end_line": max(nodes_by_file.get(primary_file, {1}))
         }
 
+    # Adds neighboring nodes (parent, children, call edges) around path nodes
     def _expand_context_nodes(
         self,
         node_map: Dict[str, GraphNode],

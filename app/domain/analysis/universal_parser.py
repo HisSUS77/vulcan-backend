@@ -59,6 +59,7 @@ class StandardNode:
     # Scope information
     scope_id: Optional[str] = None
     
+    # Return a compact debug string showing node type, optional name, and source location.
     def __repr__(self) -> str:
         name_str = f" '{self.name}'" if self.name else ""
         return f"<StandardNode {self.type}{name_str} at {self.start_point[0]}:{self.start_point[1]}>"
@@ -353,7 +354,8 @@ class UniversalParser:
     def get_available_languages(self) -> List[LanguageType]:
         """Get list of currently loaded languages"""
         return list(self.languages.keys())
-    
+
+    # Return True if a grammar was successfully loaded for the given language.
     def is_language_supported(self, language: LanguageType) -> bool:
         """Check if a language is currently supported"""
         return language in self.languages

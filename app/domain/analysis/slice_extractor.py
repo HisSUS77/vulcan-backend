@@ -53,6 +53,7 @@ class SliceExtractor:
         
         return "\n\n".join(snippets)
     
+    # Return source lines surrounding a single node, marking its line with a ">>>" prefix.
     def extract_context(self, node: GraphNode, original_code: str, context_lines: int = 3) -> str:
         """
         Extract code around a specific node with context.

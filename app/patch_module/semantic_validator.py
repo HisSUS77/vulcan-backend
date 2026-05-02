@@ -8,6 +8,7 @@ from app.patch_module.models import ValidationResult
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
+# Route to the vulnerability-specific semantic check based on normalized vuln_type key.
 def validate_semantics(
     vuln_type: str,
     sink: str | None,
@@ -150,6 +151,7 @@ def validate_semantics(
 
 # ── OWASP A03 — Injection ─────────────────────────────────────────────────────
 
+# Verify that parameterized queries or safe ORM methods replaced raw SQL string building.
 def _sqli(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Good: parameterized placeholders
@@ -173,6 +175,7 @@ def _sqli(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that output escaping or safe rendering replaced unsafe innerHTML usage.
 def _xss(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     unsafe_inner = "innerhtml" in t and "dompurify" not in t
@@ -191,6 +194,7 @@ def _xss(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that unsafe shell execution and eval calls were replaced with safe alternatives.
 def _command_or_code_injection(original: str, patched: str) -> ValidationResult:
     t = patched  # keep original case — shell=False is uppercase F
 
@@ -221,6 +225,7 @@ def _command_or_code_injection(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that LDAP filter escaping was applied to user-supplied input.
 def _ldap_injection(patched: str) -> ValidationResult:
     t = patched.lower()
     escaped = "escape_filter_chars" in t or "ldap.filter.escape_filter_chars" in t or \
@@ -232,6 +237,7 @@ def _ldap_injection(patched: str) -> ValidationResult:
     )
 
 
+# Verify that NoSQL operator injection was mitigated via sanitization or type coercion.
 def _nosql_injection(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     sanitized = any(s in t for s in (
@@ -248,6 +254,7 @@ def _nosql_injection(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that GraphQL variables replaced string interpolation in query construction.
 def _graphql_injection(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     uses_vars = "variables" in t or "$" in patched
@@ -263,6 +270,7 @@ def _graphql_injection(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that external entity resolution or DTD loading was disabled to prevent XXE.
 def _xxe(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -281,6 +289,7 @@ def _xxe(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A01 — Broken Access Control ────────────────────────────────────────
 
+# Verify that an ownership or authorization check was added to prevent IDOR.
 def _idor(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     auth_check = any(s in t for s in (
@@ -295,6 +304,7 @@ def _idor(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that an allowlist or field restriction replaced unrestricted mass assignment.
 def _mass_assignment(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     allowlist = any(s in t for s in (
@@ -313,6 +323,7 @@ def _mass_assignment(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that redirect target validation against an allowlist was introduced.
 def _open_redirect(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     validation = any(s in t for s in (
@@ -328,6 +339,7 @@ def _open_redirect(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A02 — Cryptographic Failures ───────────────────────────────────────
 
+# Verify that hardcoded credentials were replaced with environment variable lookups.
 def _sensitive_data(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     uses_env = any(s in t for s in ("os.environ", "os.getenv", "process.env", "config[", "settings."))
@@ -346,6 +358,7 @@ def _sensitive_data(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that weak hash algorithms were replaced with strong cryptographic alternatives.
 def _weak_crypto(patched: str) -> ValidationResult:
     t = patched.lower()
     weak = any(w in t for w in ("md5(", "sha1(", "des.", "rc4", "hashlib.md5", "hashlib.sha1"))
@@ -363,6 +376,7 @@ def _weak_crypto(patched: str) -> ValidationResult:
 
 # ── OWASP A04 — Path Traversal ────────────────────────────────────────────────
 
+# Verify that path canonicalization and boundary checks were added to prevent directory traversal.
 def _path_traversal(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -380,6 +394,7 @@ def _path_traversal(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A05 — Security Misconfiguration ────────────────────────────────────
 
+# Verify that debug mode was disabled or the debug configuration was removed.
 def _debug_exposure(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     debug_off = "debug=false" in t or "debug = false" in t or \
@@ -391,6 +406,7 @@ def _debug_exposure(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that the CORS wildcard origin was replaced with a specific allowed origin.
 def _cors(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     specific_origin = re.search(r'origins\s*=\s*[\'"]\w', t) is not None
@@ -405,6 +421,7 @@ def _cors(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A07 — Auth Failures ─────────────────────────────────────────────────
 
+# Verify that a strong password hashing or rate-limiting mechanism was introduced.
 def _weak_auth(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     strong = any(s in t for s in (
@@ -418,6 +435,7 @@ def _weak_auth(original: str, patched: str) -> ValidationResult:
     )
 
 
+# Verify that session regeneration or secure cookie flags were added after login.
 def _session(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -433,6 +451,7 @@ def _session(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A08 — Prototype Pollution ──────────────────────────────────────────
 
+# Verify that prototype pollution guards such as null-prototype objects or key rejection were added.
 def _prototype_pollution(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -449,6 +468,7 @@ def _prototype_pollution(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A09 — Log Injection ─────────────────────────────────────────────────
 
+# Verify that log output sanitization was added to prevent CRLF or log injection.
 def _log_injection(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     sanitized = any(s in t for s in (
@@ -464,6 +484,7 @@ def _log_injection(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A10 — SSRF ─────────────────────────────────────────────────────────
 
+# Verify that URL allowlist validation or host restriction was added to prevent SSRF.
 def _ssrf(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     allowlist = any(s in t for s in (
@@ -479,6 +500,7 @@ def _ssrf(original: str, patched: str) -> ValidationResult:
 
 # ── A06 — File Upload ─────────────────────────────────────────────────────────
 
+# Verify that file extension or MIME type validation was added to restrict uploads.
 def _file_upload(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -494,6 +516,7 @@ def _file_upload(original: str, patched: str) -> ValidationResult:
 
 # ── Buffer Overflow ───────────────────────────────────────────────────────────
 
+# Verify that buffer size limits or safe allocation functions were introduced.
 def _buffer_overflow(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -509,6 +532,7 @@ def _buffer_overflow(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A07 — JWT ───────────────────────────────────────────────────────────
 
+# Verify that the JWT 'none' algorithm was blocked and a safe algorithm list or strong secret was used.
 def _jwt(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Bad: 'none' algorithm allowed
@@ -532,6 +556,7 @@ def _jwt(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A08 — Insecure Deserialization ─────────────────────────────────────
 
+# Verify that unsafe deserializers like pickle or yaml.unsafe_load were replaced with safe alternatives.
 def _insecure_deserialization(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     unsafe_still = any(s in t for s in ("pickle.loads(", "yaml.unsafe_load(", "yaml.load("))
@@ -554,6 +579,7 @@ def _insecure_deserialization(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A08 — Remote Script Execution ──────────────────────────────────────
 
+# Verify that integrity verification replaced piping downloaded content directly to a shell.
 def _remote_exec(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     unsafe = any(s in t for s in ("| bash", "| sh", "| python", "eval(", "exec("))
@@ -568,6 +594,7 @@ def _remote_exec(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A09 — Logging Disabled ─────────────────────────────────────────────
 
+# Verify that logging suppression was removed and proper logging was re-enabled.
 def _logging_disabled(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Bad: logging suppression still present
@@ -589,6 +616,7 @@ def _logging_disabled(original: str, patched: str) -> ValidationResult:
 
 # ── OWASP A09 — Silent Exception ─────────────────────────────────────────────
 
+# Verify that bare except-pass blocks were replaced with logging or re-raising the exception.
 def _silent_exception(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Bad: bare pass in except
@@ -606,6 +634,7 @@ def _silent_exception(original: str, patched: str) -> ValidationResult:
 
 # ── A06 — Vulnerable Components ───────────────────────────────────────────────
 
+# Verify that wildcard or VCS dependency references were replaced with pinned versions.
 def _vulnerable_components(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Good: pinned versions, https registry
@@ -626,6 +655,7 @@ def _vulnerable_components(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Insecure Random ─────────────────────────────────────────────────────
 
+# Verify that cryptographically weak random sources were replaced with the secrets module or equivalent.
 def _insecure_random(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     weak = any(s in t for s in ("math.random()", "random.random()", "random.randint("))
@@ -649,6 +679,7 @@ def _insecure_random(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Hardcoded IV ────────────────────────────────────────────────────────
 
+# Verify that a static IV was replaced with a randomly generated one per encryption operation.
 def _hardcoded_iv(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     random_iv = any(s in t for s in ("os.urandom(", "crypto.randombytes(", "random_bytes"))
@@ -666,6 +697,7 @@ def _hardcoded_iv(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Timing Attack ───────────────────────────────────────────────────────
 
+# Verify that constant-time comparison replaced a direct equality check on secrets.
 def _timing_attack(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in ("hmac.compare_digest", "timingsafeequal", "timing_safe"))
@@ -682,6 +714,7 @@ def _timing_attack(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Clear-text Transmission ────────────────────────────────────────────
 
+# Verify that plain HTTP URLs were upgraded to HTTPS to enforce encrypted transmission.
 def _cleartext_transmission(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     http_still = bool(re.search(r'http://(?!localhost|127\.)', t))
@@ -700,6 +733,7 @@ def _cleartext_transmission(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Disabled Certificate Validation ────────────────────────────────────
 
+# Verify that disabled TLS certificate validation was restored to the secure default.
 def _cert_validation(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     verify_false = "verify=false" in t or "rejectunauthorized: false" in t or \
@@ -718,6 +752,7 @@ def _cert_validation(original: str, patched: str) -> ValidationResult:
 
 # ── A02 — Password in URL ─────────────────────────────────────────────────────
 
+# Verify that credentials embedded in URLs were removed from the patched code.
 def _password_in_url(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     url_creds = bool(re.search(r'https?://[^:]+:[^@]+@', t))
@@ -736,6 +771,7 @@ def _password_in_url(original: str, patched: str) -> ValidationResult:
 
 # ── A05 — Insecure Cookie ─────────────────────────────────────────────────────
 
+# Verify that Secure, HttpOnly, and SameSite flags were added to cookie settings.
 def _insecure_cookie(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     secure_flag = "secure=true" in t or "secure: true" in t
@@ -751,6 +787,7 @@ def _insecure_cookie(original: str, patched: str) -> ValidationResult:
 
 # ── A05 — Clickjacking ────────────────────────────────────────────────────────
 
+# Verify that an X-Frame-Options or CSP frame-ancestors header was added to prevent clickjacking.
 def _clickjacking(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     header = "x-frame-options" in t or "frame-ancestors" in t or "content-security-policy" in t
@@ -764,6 +801,7 @@ def _clickjacking(original: str, patched: str) -> ValidationResult:
 
 # ── A05 — Information Exposure ────────────────────────────────────────────────
 
+# Verify that stack traces and debug details were replaced with generic error responses.
 def _information_exposure(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Bad: stack trace or debug info in response
@@ -781,6 +819,7 @@ def _information_exposure(original: str, patched: str) -> ValidationResult:
 
 # ── A01 — Admin Route ─────────────────────────────────────────────────────────
 
+# Verify that authentication and admin role checks were added to protect admin routes.
 def _admin_route(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     auth_check = any(s in t for s in (
@@ -797,6 +836,7 @@ def _admin_route(original: str, patched: str) -> ValidationResult:
 
 # ── A01 — Zip Slip ────────────────────────────────────────────────────────────
 
+# Verify that zip entry path validation was added to prevent zip-slip directory traversal.
 def _zip_slip(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (
@@ -814,6 +854,7 @@ def _zip_slip(original: str, patched: str) -> ValidationResult:
 
 # ── A04 — Template Injection ──────────────────────────────────────────────────
 
+# Verify that render_template_string was replaced with a fixed template file and autoescaping.
 def _template_injection(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Bad: render_template_string with user input
@@ -834,6 +875,7 @@ def _template_injection(original: str, patched: str) -> ValidationResult:
 
 # ── A04 — ReDoS ───────────────────────────────────────────────────────────────
 
+# Verify that input length limits or a fixed regex pattern were added to mitigate ReDoS.
 def _regex_dos(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     # Good: input length limit, fixed pattern, timeout
@@ -851,6 +893,7 @@ def _regex_dos(original: str, patched: str) -> ValidationResult:
 
 # ── A04 — Rate Limiting ───────────────────────────────────────────────────────
 
+# Verify that a rate-limiting or throttling mechanism was applied to the endpoint.
 def _rate_limiting(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     rate_limited = any(s in t for s in (
@@ -867,6 +910,7 @@ def _rate_limiting(original: str, patched: str) -> ValidationResult:
 
 # ── A04 — Race Condition / TOCTOU ─────────────────────────────────────────────
 
+# Verify that a file lock or atomic operation replaced a TOCTOU-prone check-then-act pattern.
 def _race_condition(original: str, patched: str) -> ValidationResult:
     t = patched.lower()
     safe = any(s in t for s in (

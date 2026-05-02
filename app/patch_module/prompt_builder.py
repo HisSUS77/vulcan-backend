@@ -422,6 +422,7 @@ class PromptBuilder:
     Covers all 59 vulnerability types detected by the Vulcan engine.
     """
 
+    # Build a direct unified diff generation prompt with few-shot examples and remediation rules.
     @staticmethod
     def build_prompt(
         language: str,
@@ -890,6 +891,7 @@ class PromptBuilder:
             original_prompt,
         ])
 
+    # Look up the best-matching remediation rule for the given language and normalized vuln key.
     @staticmethod
     def _rules_for_vuln(language: str, vuln_key: str) -> str:
         lang = "python" if language.startswith("py") else "javascript"

@@ -67,6 +67,7 @@ class LLMService:
       • structured JSON response parsing
     """
 
+    # Initializes detection role LLM pool, response cache, and logs service startup
     def __init__(self) -> None:
         self._pool = RoleAwareLLMPool(
             role="detection",
@@ -79,6 +80,7 @@ class LLMService:
 
     # ── System prompt ─────────────────────────────────────────────────────────
 
+    # Reads detection system prompt from file, falling back to a default string
     def _load_system_prompt(self) -> str:
         try:
             p = Path(__file__).parent.parent.parent / "app" / "LLM-prompts" / "detect-system-prompt.txt"
@@ -130,6 +132,7 @@ class LLMService:
 
     # ── Prompt builder ────────────────────────────────────────────────────────
 
+    # Builds the user prompt JSON with code snippet, source/sink context, and OWASP info
     def _build_prompt(
         self,
         code_snippet:     str,
@@ -167,6 +170,7 @@ class LLMService:
             "Only mark vulnerable if the code is actually exploitable."
         )
 
+    # Heuristically identifies Python, JS, or TS from code token patterns
     def _detect_language(self, code: str) -> str:
         code_lower = code.lower()
         ts_score     = sum(1 for p in (": string", ": number", ": boolean", "interface ", "type ") if p in code)
@@ -180,6 +184,7 @@ class LLMService:
 
     # ── Response parser ───────────────────────────────────────────────────────
 
+    # Parses LLM JSON response into LLMClassificationResult, handling both format variants
     def _parse_response(
         self, response: str, rule_name: str, owasp: str, cwe: Optional[str]
     ) -> LLMClassificationResult:
@@ -228,6 +233,7 @@ class LLMService:
 
     # ── Fallback ──────────────────────────────────────────────────────────────
 
+    # Returns a LIKELY_VULNERABLE result used when LLM is unavailable
     def _get_fallback_result(
         self,
         rule_name: str = "Unknown",
@@ -249,6 +255,7 @@ class LLMService:
 _llm_service_instance: Optional[LLMService] = None
 
 
+# Returns or creates the global LLMService singleton
 def get_llm_service() -> LLMService:
     global _llm_service_instance
     if _llm_service_instance is None:

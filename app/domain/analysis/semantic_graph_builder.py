@@ -30,6 +30,7 @@ class SemanticGraphBuilder:
     - Maintains backward compatibility with SemanticGraph schema
     """
     
+    # Creates CPGParser and TaintEngine for the given language
     def __init__(self, language: str = "python"):
         self.language = language
         self.cpg_parser = CPGParser()

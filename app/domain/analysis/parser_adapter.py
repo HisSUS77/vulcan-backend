@@ -72,6 +72,7 @@ class StandardToGraphAdapter:
         "false": NodeType.LITERAL,
     }
     
+    # Initialize counters and the StandardNode-to-GraphNode ID mapping table.
     def __init__(self):
         self.node_counter = 0
         self.node_id_map: Dict[int, str] = {}  # Map StandardNode id to GraphNode id
@@ -110,6 +111,7 @@ class StandardToGraphAdapter:
         
         return SemanticGraph(nodes=nodes, edges=edges)
     
+    # Recursively walk the StandardNode tree, creating a GraphNode and AST_CHILD edge for each non-skipped node.
     def _convert_node(
         self,
         std_node: StandardNode,
@@ -159,6 +161,7 @@ class StandardToGraphAdapter:
         for child in std_node.children:
             self._convert_node(child, node_id, filename, nodes, edges)
     
+    # Map a tree-sitter node type string to the closest Vulcan NodeType enum value.
     def _map_node_type(self, std_node: StandardNode) -> NodeType:
         """Map StandardNode type to Vulcan NodeType"""
         node_type = std_node.type
@@ -190,6 +193,7 @@ class StandardToGraphAdapter:
         # Default
         return NodeType.EXPRESSION
     
+    # Return True for structural/punctuation nodes that add no semantic value to the graph.
     def _should_skip_node(self, std_node: StandardNode) -> bool:
         """Determine if a node should be skipped (not converted)"""
         skip_types = {
@@ -211,6 +215,7 @@ class StandardToGraphAdapter:
         }
         return std_node.type in skip_types
     
+    # Pull a short, meaningful string value from a node: literal source, identifier name, or brief source text.
     def _extract_value(self, std_node: StandardNode) -> Optional[str]:
         """Extract a meaningful value from the node"""
         # For literals, return the source code
@@ -227,6 +232,7 @@ class StandardToGraphAdapter:
         
         return None
     
+    # Increment the internal counter and return a unique node ID string.
     def _next_id(self) -> str:
         """Generate unique node ID"""
         node_id = f"node_{self.node_counter}"
@@ -246,9 +252,10 @@ class UniversalASTParser:
         graph = parser.parse(code, filename)
     """
     
+    # Resolve the language string to a LanguageType and set up the UniversalParser and adapter.
     def __init__(self, language: str = "python"):
         self.language = language.lower()
-        
+
         # Map language string to LanguageType
         lang_map = {
             "python": LanguageType.PYTHON,

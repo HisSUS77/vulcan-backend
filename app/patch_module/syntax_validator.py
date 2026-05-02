@@ -129,6 +129,7 @@ def validate_javascript_syntax(original_text: str, diff_text: str) -> Validation
         return ValidationResult(name="js_syntax", passed=False, details=str(exc))
 
 
+# Dispatch to the language-appropriate syntax validator and return its results.
 def run_syntax_validators(
     language: str, original_text: str, diff_text: str
 ) -> List[ValidationResult]:

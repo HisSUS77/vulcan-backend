@@ -49,6 +49,7 @@ class CFGBuilder:
     - Return edges
     """
     
+    # Initializes empty CFG state: node registry, entry point, and exit node set.
     def __init__(self):
         self.cfg_nodes: Dict[str, CFGNode] = {}
         self.entry_node: Optional[str] = None
@@ -138,6 +139,7 @@ class CFGBuilder:
         
         return self.cfg_nodes, cfg_edges
     
+    # Collects and sorts by line all graph nodes whose scope_id matches the function node's id.
     def _get_function_body_nodes(self, func_node: GraphNode, graph: SemanticGraph) -> List[GraphNode]:
         """Get all nodes in function body"""
         body_nodes = []
@@ -153,6 +155,7 @@ class CFGBuilder:
         
         return body_nodes
     
+    # Returns the node ids of the true and false branch children of an if-statement node.
     def _extract_branches(self, if_node: GraphNode, graph: SemanticGraph) -> Tuple[Optional[str], Optional[str]]:
         """Extract true/false branches from if statement"""
         # Simplified - in reality, parse the AST children
@@ -163,6 +166,7 @@ class CFGBuilder:
         
         return true_branch, false_branch
     
+    # Returns the direct child nodes of a loop node sorted by line, representing the loop body.
     def _get_loop_body(self, loop_node: GraphNode, graph: SemanticGraph) -> List[GraphNode]:
         """Get loop body nodes"""
         body_nodes = []
@@ -184,6 +188,7 @@ class DFGBuilder:
     - Reaching definitions
     """
     
+    # Initializes empty DFG state: definitions map, uses map, and def-use edge list.
     def __init__(self):
         self.definitions: Dict[str, List[str]] = {}  # variable -> [def_node_ids]
         self.uses: Dict[str, List[str]] = {}  # variable -> [use_node_ids]
@@ -259,6 +264,7 @@ class DFGBuilder:
         
         return dfg_edges
     
+    # Scans graph nodes and returns the node matching the given id, or None.
     def _find_node(self, node_id: str, graph: SemanticGraph) -> Optional[GraphNode]:
         """Find node by ID"""
         for node in graph.nodes:
@@ -306,6 +312,7 @@ class DFGBuilder:
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[0][0]
     
+    # Returns True if def_scope is the same as or an ancestor of use_scope in the scope hierarchy.
     def _is_visible_scope(self, def_scope: Optional[str], use_scope: Optional[str], graph: SemanticGraph) -> bool:
         """Check if definition scope is visible from use scope"""
         if def_scope == use_scope:

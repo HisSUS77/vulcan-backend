@@ -493,10 +493,12 @@ class HTMLParser:
                 return child.source_code
         return node.source_code
 
+    # Extract and lowercase the HTML tag name from a start-tag string.
     def _parse_tag_name(self, start_tag: str) -> str:
         match = re.search(r'<\s*([a-zA-Z0-9:_-]+)', start_tag)
         return match.group(1).lower() if match else ""
 
+    # Parse all key-value attribute pairs from a start-tag string into a dict.
     def _parse_attributes(self, start_tag: str) -> Dict[str, str]:
         attrs: Dict[str, str] = {}
         pattern = r"([:@\w-]+)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+))?"

@@ -212,6 +212,7 @@ class InterproceduralDFG:
         
         return self.get_cpg()
 
+    # Creates DFG_CALL_ARG edges from each argument node to its call expression node.
     def _link_call_argument_flows(self):
         """Create DFG edges from call arguments to call expressions."""
         for call_site in self.call_sites:
@@ -236,6 +237,7 @@ class InterproceduralDFG:
                 edge.metadata["dfg_edge_type"] = "DFG_CALL_ARG"
                 self.dfg_edges.append(edge)
 
+    # Adds DFG_EXPR_FLOW edges from identifier/literal/parameter children up to their parent expression nodes.
     def _link_expression_flows(self):
         """Link identifier/literal nodes to their parent expressions for forward flow."""
         node_map = {n.id: n for n in self.cpg.nodes}
@@ -269,6 +271,7 @@ class InterproceduralDFG:
             flow_edge.metadata["dfg_edge_type"] = "DFG_EXPR_FLOW"
             self.dfg_edges.append(flow_edge)
     
+    # Walks CPG nodes to build FunctionSignature records for every function-typed node.
     def _extract_functions(self):
         """Extract all function signatures from CPG"""
         for node in self.cpg.nodes:
@@ -300,6 +303,7 @@ class InterproceduralDFG:
                 
         logger.debug("  Extracted %d function signatures", len(self.functions))
     
+    # Walks CPG nodes to collect CallSite records for every call-expression node.
     def _extract_call_sites(self):
         """Extract all function call sites"""
         for node in self.cpg.nodes:
@@ -331,6 +335,7 @@ class InterproceduralDFG:
         
         logger.debug("  Found %d call sites", len(self.call_sites))
     
+    # Tracks variable definitions and uses within each function, then builds def-use chains.
     def _build_intraprocedural_dfg(self):
         """Build data flow within each function"""
         for func_sig in self.functions.values():
@@ -345,6 +350,7 @@ class InterproceduralDFG:
             # Build def-use chains
             self._build_def_use_chains(func_sig)
     
+    # Creates DFG_ARG_PASS edges connecting each call-site argument to the matching callee parameter.
     def _build_argument_flows(self):
         """Build parameter-to-argument data flow edges"""
         for call_site in self.call_sites:
@@ -384,6 +390,7 @@ class InterproceduralDFG:
                     
                     self.dfg_edges.append(edge)
     
+    # Creates DFG_RET edges from each callee return value node back to the call site.
     def _build_return_flows(self):
         """Build return value to call site data flow edges"""
         for call_site in self.call_sites:
@@ -619,6 +626,7 @@ class InterproceduralDFG:
     # Helper Methods
     # =========================
     
+    # Returns all PARAMETER-typed child nodes of the given function node.
     def _find_parameters(self, func_node_id: str) -> List[GraphNode]:
         """Find parameter nodes of a function"""
         params = []
@@ -629,6 +637,7 @@ class InterproceduralDFG:
                     params.append(param_node)
         return params
     
+    # Collects node IDs of all RETURN-typed nodes found in the function body.
     def _find_return_statements(self, func_node_id: str) -> List[str]:
         """Find all return statement node IDs in a function"""
         returns = []
@@ -665,6 +674,7 @@ class InterproceduralDFG:
         
         return captured
     
+    # Walks up AST_CHILD edges to find the nearest enclosing function node id.
     def _get_parent_scope(self, node_id: str) -> Optional[str]:
         """Find parent scope (enclosing function) of a node"""
         # Walk up AST_CHILD edges
@@ -688,6 +698,7 @@ class InterproceduralDFG:
         
         return "global"
     
+    # Returns the name of the function that contains the given node, or a sentinel string.
     def _find_enclosing_function(self, node_id: str) -> str:
         """Find the function containing this node"""
         scope = self._get_parent_scope(node_id)
@@ -697,6 +708,7 @@ class InterproceduralDFG:
         func_node = self._get_node_by_id(scope)
         return func_node.name if func_node else "__unknown__"
     
+    # Extracts the callee name from a call node's own name or its identifier/member-access child.
     def _get_callee_name(self, call_node: GraphNode) -> str:
         """Extract callee function name from call node"""
         # Look for function name in call expression
@@ -713,6 +725,7 @@ class InterproceduralDFG:
         
         return "__unknown__"
     
+    # Returns AST child nodes of a call expression that represent its arguments (excluding the callee).
     def _find_arguments(self, call_node_id: str) -> List[GraphNode]:
         """Find argument nodes of a call"""
         args = []
@@ -748,6 +761,7 @@ class InterproceduralDFG:
         
         return False, None
     
+    # Recursively collects all descendant nodes of a function via AST_CHILD edges.
     def _get_function_body_nodes(self, func_node_id: str) -> List[GraphNode]:
         """Get all nodes in function body (recursive traversal)"""
         visited = set()
@@ -770,6 +784,7 @@ class InterproceduralDFG:
         traverse(func_node_id)
         return result
     
+    # Records the node id in variable_defs or variable_uses depending on whether it is a definition or identifier use.
     def _track_variable_flow(self, node: GraphNode, func_sig: FunctionSignature):
         """Track variable definitions and uses"""
         if node.type in {NodeType.ASSIGNMENT, NodeType.VARIABLE, NodeType.PARAMETER}:
@@ -786,6 +801,7 @@ class InterproceduralDFG:
                     self.variable_uses[node.name] = []
                 self.variable_uses[node.name].append(node.id)
     
+    # Connects each variable definition to subsequent uses within the same function via DFG_VAR_USE edges.
     def _build_def_use_chains(self, func_sig: FunctionSignature):
         """Build def-use chains within a function"""
         # For each variable, connect defs to uses
@@ -829,6 +845,7 @@ class InterproceduralDFG:
                         
                         self.dfg_edges.append(edge)
     
+    # Marks a call site with DFG_UNCERTAIN metadata when the callee cannot be resolved.
     def _add_uncertain_call(self, call_site: CallSite):
         """Add uncertain edges for unknown function calls"""
         metadata = DFGMetadata(
@@ -841,6 +858,7 @@ class InterproceduralDFG:
         # Mark call site as uncertain
         # (Could be refined with heuristics or external info)
     
+    # Returns the first AST child node id of a return statement, representing the returned value.
     def _get_return_value_node(self, return_stmt_id: str) -> Optional[str]:
         """Get the actual value being returned"""
         for edge in self.cpg.edges:
@@ -848,6 +866,7 @@ class InterproceduralDFG:
                 return edge.to_node
         return None
     
+    # Looks up definition node ids for a variable restricted to the specified parent scope.
     def _find_var_in_parent_scope(self, var_name: str, parent_scope: Optional[str]) -> List[str]:
         """Find variable definition in parent scope"""
         if not parent_scope or parent_scope == "global":
@@ -860,6 +879,7 @@ class InterproceduralDFG:
         
         return [d for d in self.variable_defs.get(var_name, []) if d in parent_node_ids]
     
+    # Returns use node ids for a variable that are contained within the given function body.
     def _find_var_uses_in_function(self, var_name: str, func_id: str) -> List[str]:
         """Find variable uses within a specific function"""
         func_nodes = self._get_function_body_nodes(func_id)
@@ -867,6 +887,7 @@ class InterproceduralDFG:
         
         return [u for u in self.variable_uses.get(var_name, []) if u in func_node_ids]
     
+    # Resolves a callback argument node to its FunctionSignature, handling direct functions and identifier references.
     def _resolve_callback_function(self, callback_arg_id: str) -> Optional[FunctionSignature]:
         """Resolve callback argument to actual function"""
         callback_node = self._get_node_by_id(callback_arg_id)
@@ -883,6 +904,7 @@ class InterproceduralDFG:
         # Could be a variable reference - would need more analysis
         return None
     
+    # Finds call-expression nodes inside a function where the callee matches the callback parameter name.
     def _find_callback_invocations(self, func_id: str, callback_param_name: str) -> List[GraphNode]:
         """Find where callback parameter is invoked"""
         invocations = []
@@ -896,6 +918,7 @@ class InterproceduralDFG:
         
         return invocations
     
+    # Creates DFG_CALLBACK edges from each argument of a callback invocation to the callback's parameters.
     def _connect_callback_flow(self, invocation_node: GraphNode, callback_func: FunctionSignature):
         """Connect callback invocation to callback function parameters"""
         # Find arguments to callback invocation
@@ -928,11 +951,13 @@ class InterproceduralDFG:
                 
                 self.dfg_edges.append(edge)
     
+    # Heuristically detects tuple-unpacking assignments by looking for a comma in the source code.
     def _is_tuple_unpack(self, node: GraphNode) -> bool:
         """Check if assignment is tuple unpacking"""
         # Look for tuple pattern on LHS or multiple assignment targets
         return "," in (node.source_code or "")  # Simplistic check
     
+    # Returns the first CALL_EXPRESSION child of an assignment node, representing the RHS call.
     def _find_call_in_assignment(self, assignment_id: str) -> Optional[GraphNode]:
         """Find call expression on RHS of assignment"""
         for edge in self.cpg.edges:
@@ -942,10 +967,12 @@ class InterproceduralDFG:
                     return child
         return None
     
+    # Delegates to _get_callee_name to extract the callee name from a call node.
     def _get_callee_name_from_node(self, call_node: GraphNode) -> str:
         """Get callee name from call node"""
         return self._get_callee_name(call_node)
 
+    # Returns the identifier or member-access child of a call expression that names the callee.
     def _get_callee_node(self, call_node_id: str) -> Optional[GraphNode]:
         """Get callee node for a call expression."""
         for edge in self.cpg.edges:
@@ -955,6 +982,7 @@ class InterproceduralDFG:
                     return child
         return None
 
+    # Walks the lexical scope chain to find the function node id that an identifier name resolves to.
     def _resolve_identifier_to_function(self, identifier: Optional[str], scope_id: Optional[str]) -> Optional[str]:
         """Resolve identifier to a function node id via scope-aware symbol table."""
         if not identifier:
@@ -978,6 +1006,7 @@ class InterproceduralDFG:
                 return resolved
         return None
 
+    # Checks if a symbol node is itself a function or has a function child, returning its node id.
     def _resolve_symbol_node_to_function(self, symbol_node_id: str) -> Optional[str]:
         """Resolve a symbol node to an underlying function node."""
         symbol_node = self._get_node_by_id(symbol_node_id)
@@ -993,6 +1022,7 @@ class InterproceduralDFG:
                     return child.id
         return None
     
+    # Returns node ids of identifier children of a tuple-unpacking assignment (the LHS targets).
     def _find_unpack_targets(self, assignment_id: str) -> List[str]:
         """Find unpacking target variable IDs"""
         targets = []
@@ -1003,6 +1033,7 @@ class InterproceduralDFG:
                     targets.append(child.id)
         return targets
     
+    # Locates the individual element node ids within tuple expressions returned by a function.
     def _find_return_tuple_elements(self, func_sig: FunctionSignature) -> List[str]:
         """Find elements of returned tuple"""
         elements = []
@@ -1018,6 +1049,7 @@ class InterproceduralDFG:
                                 elements.append(e2.to_node)
         return elements
     
+    # Returns node ids that have an incoming edge to the given node, used as potential taint sources.
     def _find_potential_sources(self, node_id: str) -> List[str]:
         """Find potential data sources for uncertain flow"""
         # For uncertain nodes, look at incoming edges
@@ -1027,6 +1059,7 @@ class InterproceduralDFG:
                 sources.append(edge.from_node)
         return sources
     
+    # Returns node ids that have an outgoing edge from the given node, used as potential taint sinks.
     def _find_potential_sinks(self, node_id: str) -> List[str]:
         """Find potential data sinks for uncertain flow"""
         # For uncertain nodes, look at outgoing edges
@@ -1036,10 +1069,12 @@ class InterproceduralDFG:
                 sinks.append(edge.to_node)
         return sinks
     
+    # Looks up and returns a CPG node by its id, or None if not found.
     def _get_node_by_id(self, node_id: str) -> Optional[GraphNode]:
         """Helper to get node by ID"""
         return next((n for n in self.cpg.nodes if n.id == node_id), None)
     
+    # Returns a new SemanticGraph combining the original CPG edges with all accumulated DFG edges.
     def get_cpg(self) -> SemanticGraph:
         """Return CPG with DFG edges added"""
         all_edges = list(self.cpg.edges) + self.dfg_edges
@@ -1118,6 +1153,7 @@ class InterproceduralDFG:
         dfs(source_node_id, sink_node_id, [], 0)
         return paths
     
+    # Determines the highest uncertainty level among all edge types in a data flow path.
     def _compute_path_uncertainty(self, path: List[Tuple[str, str, DFGEdgeType]]) -> UncertaintyLevel:
         """Compute overall uncertainty of a path"""
         if any(edge_type == DFGEdgeType.DFG_UNCERTAIN for _, _, edge_type in path):
@@ -1128,6 +1164,7 @@ class InterproceduralDFG:
         
         return UncertaintyLevel.CERTAIN
     
+    # Averages the confidence metadata of each edge in the path to produce an overall score.
     def _compute_path_confidence(self, path: List[Tuple[str, str, DFGEdgeType]]) -> float:
         """Compute confidence score for a path"""
         if not path:
@@ -1143,6 +1180,7 @@ class InterproceduralDFG:
         
         return sum(confidences) / len(confidences) if confidences else 0.0
     
+    # Formats a data flow path as a human-readable arrow-separated string of node names and edge types.
     def _describe_path(self, path: List[Tuple[str, str, DFGEdgeType]]) -> str:
         """Generate human-readable path description"""
         steps = []
@@ -1157,6 +1195,7 @@ class InterproceduralDFG:
         
         return " → ".join(steps)
     
+    # Returns a summary dict of function count, call site count, edge counts by type, and uncertain edge count.
     def get_statistics(self) -> Dict[str, Any]:
         """Get DFG statistics"""
         stats = {
