@@ -110,17 +110,16 @@ async def check_scan_quota(user: dict, db) -> None:
     if limit is None:
         return
 
-    # Count scans started by this user in the last 24 hours
-    from datetime import timedelta
+    # Count scans started by this user since midnight today (UTC)
     now = datetime.utcnow()
-    window_start = now - timedelta(hours=24)
+    midnight = datetime(now.year, now.month, now.day, 0, 0, 0)
 
     from app.db.mongo import to_object_id
     user_oid = to_object_id(user.get("id"))
 
     count = await db.scans.count_documents({
         "user_id":    user_oid,
-        "created_at": {"$gte": window_start},
+        "created_at": {"$gte": midnight},
     })
 
     if count >= limit:
@@ -128,8 +127,8 @@ async def check_scan_quota(user: dict, db) -> None:
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=(
                 f"Daily scan quota exceeded. "
-                f"Your plan ({role}) allows {limit} scans per 24 hours. "
+                f"Your plan ({role}) allows {limit} scans per day. "
                 f"Used: {count}/{limit}. "
-                f"Quota resets 24 hours after your first scan."
+                f"Quota resets at midnight (UTC)."
             ),
         )
