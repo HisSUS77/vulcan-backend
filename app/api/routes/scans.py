@@ -8,7 +8,7 @@ from app.enums.role import UserRole
 from app.schemas.scan import ScanStart, ScanResponse, ScanStatusRead, ScanSummary
 from app.services.scan_service import ScanService
 from app.services.repository_service import RepositoryService
-from app.core.permissions import can_access_resource
+from app.core.permissions import can_access_resource, check_scan_quota
 from app.core.exceptions import AuthorizationException, ResourceNotFoundException
 from datetime import datetime
 from app.core.trace import trace_step
@@ -115,6 +115,9 @@ async def start_scan(
     Accessible to: All authenticated users (admin, premium, normal)
     """
     try:
+        # Enforce monthly scan quota before starting (C1-C5)
+        await check_scan_quota(user, db)
+
         service = ScanService(db)
         repo_url = None
         repo_provider = None
