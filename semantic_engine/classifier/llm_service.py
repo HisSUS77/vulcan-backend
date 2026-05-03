@@ -40,6 +40,21 @@ def _safe_json_loads(text: str) -> dict:
         return json.loads(cleaned, strict=False)
 
 
+def _extract_json_payload(text: str) -> str:
+    """Extract the most likely JSON object from LLM output."""
+    stripped = text.strip()
+
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        stripped = fence_match.group(1).strip()
+
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("No JSON in response")
+    return stripped[start:end + 1]
+
+
 class Classification(str, Enum):
     SAFE             = "SAFE"
     VULNERABLE       = "VULNERABLE"
@@ -184,12 +199,8 @@ class LLMService:
         self, response: str, rule_name: str, owasp: str, cwe: Optional[str]
     ) -> LLMClassificationResult:
         try:
-            start = response.find("{")
-            end   = response.rfind("}") + 1
-            if start < 0 or end <= start:
-                raise ValueError("No JSON in response")
-
-            data = _safe_json_loads(response[start:end])
+            payload = _extract_json_payload(response)
+            data = _safe_json_loads(payload)
 
             # Vulcan-LLM format (has "vulnerable" field)
             if "vulnerable" in data:

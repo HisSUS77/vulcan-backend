@@ -24,3 +24,5 @@ tests/.tmp_work/
 
 # CPG output files
 cpg_*.json
+
+graphify-out/*

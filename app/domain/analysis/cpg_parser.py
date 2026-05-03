@@ -135,25 +135,46 @@ class CPGParser:
         return default_path
     
     def _load_languages(self):
-        """Load language grammars using tree-sitter 0.22+ package API."""
-        import tree_sitter_python as _tspy
-        import tree_sitter_javascript as _tsjs
-        import tree_sitter_typescript as _tsts
+        """Load grammars with compatibility for both old/new tree-sitter APIs."""
 
-        lang_capsules = {
-            LanguageType.PYTHON:     _tspy.language(),
-            LanguageType.JAVASCRIPT: _tsjs.language(),
-            LanguageType.TYPESCRIPT: _tsts.language_typescript(),
-        }
-
-        for lang, capsule in lang_capsules.items():
+        def _create_parser(language_obj: Language) -> Parser:
+            # Prefer explicit set_language for old API stacks; fallback to Parser(language).
+            # This avoids creating an unbound parser that later fails on parse().
             try:
-                language = Language(capsule)
-                self.languages[lang] = language
-                self.parsers[lang] = Parser(language)
-                logger.info(f"Loaded {lang.value} grammar")
-            except Exception as e:
-                logger.error(f"Failed to load {lang.value}: {e}")
+                parser = Parser()
+                parser.set_language(language_obj)
+                return parser
+            except Exception:
+                return Parser(language_obj)
+
+        loaded_any = False
+
+        # Prefer the stable tree_sitter_languages fallback first because it works
+        # reliably with the pinned tree-sitter stack in this workspace.
+        try:
+            from tree_sitter_languages import get_language
+
+            language_names = {
+                LanguageType.PYTHON: "python",
+                LanguageType.JAVASCRIPT: "javascript",
+                LanguageType.TYPESCRIPT: "typescript",
+            }
+
+            for lang, name in language_names.items():
+                try:
+                    language = get_language(name)
+                    self.languages[lang] = language
+                    self.parsers[lang] = _create_parser(language)
+                    loaded_any = True
+                    logger.info(f"Loaded {lang.value} grammar via tree_sitter_languages")
+                except Exception as inner_exc:
+                    logger.debug(f"Fallback grammar load failed for {lang.value}: {inner_exc}")
+        except Exception as fallback_exc:
+            logger.debug(f"tree_sitter_languages fallback unavailable: {fallback_exc}")
+
+        # The workspace uses tree_sitter_languages successfully; avoid probing
+        # the direct per-package API because the constructor signatures differ
+        # across tree-sitter releases and create noisy non-fatal failures.
 
     def _normalize_language(self, language: LanguageType | str) -> Optional[LanguageType]:
         """Normalize language input to LanguageType enum."""
