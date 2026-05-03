@@ -17,6 +17,7 @@ class AnalysisService:
     5. Generate patches
     """
     
+    # Stores the LLM API key for use by reasoning and patch generation steps
     def __init__(self, llm_api_key: Optional[str] = None):
         self.llm_api_key = llm_api_key
     

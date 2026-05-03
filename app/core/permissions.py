@@ -3,10 +3,18 @@ Role-based permission system.
 Provides decorators and utilities for role-based access control.
 """
 
+from datetime import datetime
 from fastapi import Depends, HTTPException, status
 from functools import wraps
 from app.enums.role import UserRole
 from app.core.exceptions import AuthorizationException
+
+# Monthly scan quota per role (C1-C5 from business rules)
+SCAN_QUOTA: dict[str, int | None] = {
+    UserRole.NORMAL.value:  5,
+    UserRole.PREMIUM.value: 50,
+    UserRole.ADMIN.value:   None,  # unlimited
+}
 
 
 def require_role(*allowed_roles: UserRole):
@@ -82,3 +90,45 @@ def verify_resource_ownership(user: dict, owner_id: str):
         raise AuthorizationException(
             f"User {user.get('id')} is not authorized to access resource owned by {owner_id}"
         ).to_http_exception()
+
+
+async def check_scan_quota(user: dict, db) -> None:
+    """
+    Enforce monthly scan quota based on user role (C1-C5).
+
+    Quota limits:
+      NORMAL  →  5 scans / month
+      PREMIUM → 50 scans / month
+      ADMIN   →  unlimited
+
+    Raises HTTP 429 when the user has reached their monthly limit.
+    """
+    role = user.get("role", UserRole.NORMAL.value)
+    limit = SCAN_QUOTA.get(role)
+
+    # Admin → unlimited (C5)
+    if limit is None:
+        return
+
+    # Count scans started by this user since midnight today (UTC)
+    now = datetime.utcnow()
+    midnight = datetime(now.year, now.month, now.day, 0, 0, 0)
+
+    from app.db.mongo import to_object_id
+    user_oid = to_object_id(user.get("id"))
+
+    count = await db.scans.count_documents({
+        "user_id":    user_oid,
+        "created_at": {"$gte": midnight},
+    })
+
+    if count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Daily scan quota exceeded. "
+                f"Your plan ({role}) allows {limit} scans per day. "
+                f"Used: {count}/{limit}. "
+                f"Quota resets at midnight (UTC)."
+            ),
+        )

@@ -20,6 +20,7 @@ _JS_ROUTE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Extracts HTTP method and route path from a code snippet using Python/JS route decorator regex
 def _extract_route(snippet: str):
     for pat in [_PYTHON_ROUTE_RE, _JS_ROUTE_RE]:
         m = pat.search(snippet or "")
@@ -27,9 +28,11 @@ def _extract_route(snippet: str):
             return m.group(1).upper(), m.group(2)
     return None, None
 
+# Converts severity string to integer rank (critical=4 … none=0)
 def _sev_rank(sev: str) -> int:
     return {"critical": 4, "high": 3, "medium": 2, "low": 1}.get((sev or "").lower(), 0)
 
+# Maps integer severity rank to risk label string
 def _rank_to_risk(rank: int) -> str:
     return ["clean", "low", "medium", "high", "critical"][min(rank, 4)]
 
@@ -38,6 +41,7 @@ _DATA_HINTS  = {"model", "db", "database", "query", "repo", "store", "schema", "
 _UTIL_HINTS  = {"util", "helper", "middleware", "auth", "security", "service", "mixin", "lib"}
 
 
+# Classifies a file path as route/data/util/other based on path keyword hints
 def _file_type(path: str) -> str:
     p = path.lower()
     if any(h in p for h in _ROUTE_HINTS):

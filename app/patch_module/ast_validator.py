@@ -56,10 +56,12 @@ def _kw(node: ast.Call, name: str) -> Optional[ast.expr]:
     return None
 
 
+# Return True if the AST node is the boolean constant True.
 def _is_true(node: Optional[ast.expr]) -> bool:
     return isinstance(node, ast.Constant) and node.value is True
 
 
+# Return True if the AST node is the boolean constant False.
 def _is_false(node: Optional[ast.expr]) -> bool:
     return isinstance(node, ast.Constant) and node.value is False
 
@@ -72,11 +74,13 @@ class _SecurityVisitor(ast.NodeVisitor):
     Each check is independent — a single Call node may trigger multiple checks.
     """
 
+    # Initialize the visitor with an empty issues list to accumulate findings.
     def __init__(self) -> None:
         self.issues: List[str] = []
 
     # ── Call-level checks ─────────────────────────────────────────────────────
 
+    # Dispatch all call-level security checks for every function call node in the AST.
     def visit_Call(self, node: ast.Call) -> None:
         name = _attr_name(node.func)
         self._check_subprocess_shell_true(node, name)
@@ -101,6 +105,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                     f"— use shell=False and a list of arguments"
                 )
 
+    # Flag direct os.system or os.popen calls which allow shell injection.
     def _check_os_system(self, name: str, node: ast.Call) -> None:
         if name in ("os.system", "os.popen"):
             self.issues.append(
@@ -108,6 +113,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 f"replace with subprocess.run([...], shell=False)"
             )
 
+    # Flag eval, exec, and compile calls that execute arbitrary code strings.
     def _check_eval_exec(self, node: ast.Call, name: str) -> None:
         if name in ("eval", "exec", "compile"):
             self.issues.append(
@@ -130,6 +136,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 f"at line {node.lineno} — use parameterized query with placeholders"
             )
 
+    # Flag pickle.loads and pickle.load calls that deserialize untrusted data unsafely.
     def _check_pickle(self, name: str, node: ast.Call) -> None:
         if name in ("pickle.loads", "pickle.load"):
             self.issues.append(
@@ -137,6 +144,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 f"never deserialize untrusted data with pickle; use json.loads()"
             )
 
+    # Flag yaml.load without SafeLoader and yaml.unsafe_load as insecure deserialization.
     def _check_yaml_unsafe(self, name: str, node: ast.Call) -> None:
         if name == "yaml.load":
             # yaml.load(data) without Loader=yaml.SafeLoader is unsafe
@@ -152,6 +160,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 f"— replace with yaml.safe_load()"
             )
 
+    # Flag requests calls with verify=False that disable TLS certificate validation.
     def _check_requests_verify_false(self, name: str, node: ast.Call) -> None:
         _REQUEST_FUNCS = {
             "requests.get", "requests.post", "requests.put",
@@ -168,6 +177,7 @@ class _SecurityVisitor(ast.NodeVisitor):
 
     # ── Assignment-level checks ────────────────────────────────────────────────
 
+    # Dispatch assignment-level security checks for every assignment node in the AST.
     def visit_Assign(self, node: ast.Assign) -> None:
         self._check_hardcoded_secret(node)
         self.generic_visit(node)

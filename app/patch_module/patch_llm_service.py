@@ -64,6 +64,7 @@ class PatchLLMService:
         "No prose. No markdown. No explanations outside the block."
     )
 
+    # Initialize the patch LLM service, configuring timeout, token limit, and the role-aware provider pool.
     def __init__(self) -> None:
         self.timeout    = int(os.getenv("PATCH_LLM_TIMEOUT", "90"))
         self.max_tokens = int(os.getenv("PATCH_LLM_MAX_TOKENS", "4000"))
@@ -177,9 +178,11 @@ class PatchLLMService:
 
     # ── Output helpers ────────────────────────────────────────────────────────
 
+    # Normalize and strip surrounding whitespace from raw LLM diff output.
     def _clean_diff(self, text: str) -> str:
         return normalize_diff_text(text).strip()
 
+    # Return a placeholder unified diff when no LLM provider is reachable.
     def _offline_diff(self) -> str:
         logger.warning("No LLM available — returning offline template patch")
         return "\n".join([

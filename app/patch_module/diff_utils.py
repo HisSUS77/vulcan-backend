@@ -133,6 +133,7 @@ def apply_unified_diff(original_text: str, diff_text: str) -> str:
     out_lines = []
     idx = 0
 
+    # Parse a unified diff @@ hunk header and return old/new start and length values.
     def parse_hunk_header(header: str):
         match = re.match(r"@@\s*-(\d+)(?:,(\d+))?\s*\+(\d+)(?:,(\d+))?\s*@@", header)
         if not match:

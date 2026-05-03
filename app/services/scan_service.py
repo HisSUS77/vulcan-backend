@@ -27,10 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 class ScanService:
+    # Stores DB reference and initializes the analysis pipeline with LLM enabled
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self.db = db
         self.pipeline = get_pipeline(PipelineConfig(enable_llm=True))
 
+    # Creates a scan document in MongoDB and dispatches the appropriate async scan task
     async def start(
         self,
         user_id: str,
@@ -101,6 +103,7 @@ class ScanService:
 
         return scan_id, input_type
 
+    # Maps a file extension to its corresponding language string
     def _detect_language(self, path: Path) -> Optional[str]:
         ext = path.suffix.lower()
         return {
@@ -120,6 +123,7 @@ class ScanService:
             ".pug": "html",
         }.get(ext)
 
+    # Recursively finds all scannable source files under the given root directory
     def _collect_source_files(self, root: Path) -> list[Path]:
         files = []
         for path in root.rglob("*"):
@@ -129,12 +133,14 @@ class ScanService:
                     files.append(path)
         return files
 
+    # Normalizes a file path to a consistent lowercase/forward-slash key for comparison
     def _path_key(self, path: Optional[str]) -> str:
         if not path:
             return ""
         normalized = str(path).replace("\\", "/")
         return normalized.lower() if os.name == "nt" else normalized
 
+    # Converts an absolute or relative path to a repo-relative forward-slash path
     def _normalize_repo_path(
         self,
         repo_root: Path,
@@ -168,6 +174,7 @@ class ScanService:
                 path_str = best
         return path_str
 
+    # Groups a vulnerability type string into a canonical category key
     @staticmethod
     def _vuln_type_group(type_str: str) -> str:
         t = (type_str or "").lower()
@@ -183,6 +190,7 @@ class ScanService:
         if "cross-site scripting" in t or "xss" in t:             return "xss"
         return t.replace(" ", "_").replace("-", "_")
 
+    # Returns a sortable tuple ranking a vulnerability by DFG flow, path length, and confidence
     @staticmethod
     def _vuln_score(vuln: dict) -> tuple:
         evidence = vuln.get("evidence") or {}
@@ -211,6 +219,7 @@ class ScanService:
                     return int(m.group(1))
         return location.get("end_line") or location.get("start_line") or 0
 
+    # Collapses duplicate findings by type, file, and sink line, preferring highest-quality evidence
     def _dedupe_vulnerabilities(
         self,
         repo_root: Optional[Path],
@@ -312,6 +321,7 @@ class ScanService:
 
         return final
 
+    # Filters a global graph down to only the nodes and edges belonging to one file
     def _filter_graph_for_file(
         self,
         graph_data: dict,
@@ -349,6 +359,7 @@ class ScanService:
         ]
         return {"nodes": nodes, "edges": edges}
 
+    # Extracts a ZIP or TAR archive to the destination directory
     def _extract_archive(self, archive_path: Path, dest_dir: Path) -> None:
         if archive_path.suffix == ".zip":
             with zipfile.ZipFile(archive_path, "r") as zf:
@@ -364,6 +375,7 @@ class ScanService:
             return
         raise ValueError("Unsupported archive format")
 
+    # Git-clones a repository at the requested branch, falling back to main or master on failure
     def _clone_repo(self, url: str, branch: str, token: Optional[str], dest_dir: Path) -> None:
         clone_url = url
         if token and url.startswith("https://"):
@@ -389,6 +401,7 @@ class ScanService:
 
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stderr)
 
+    # Pushes new log lines to the scan document in MongoDB
     async def _append_logs(self, scan_id: str, logs: list[str]) -> None:
         if not logs:
             return
@@ -400,12 +413,14 @@ class ScanService:
             },
         )
 
+    # Updates scan fields and optionally appends log lines in a single atomic write
     async def _update_scan(self, scan_id: str, updates: Dict[str, Any], logs: Optional[list[str]] = None) -> None:
         update_doc: Dict[str, Any] = {"$set": {**updates, "updated_at": datetime.utcnow()}}
         if logs:
             update_doc["$push"] = {"logs": {"$each": logs}}
         await self.db.scans.update_one({"scan_id": scan_id}, update_doc)
 
+    # Async worker that runs the pipeline on pasted code and writes results to MongoDB
     async def _run_direct_code_scan(
         self,
         scan_id: str,
@@ -541,6 +556,7 @@ class ScanService:
                 [f"[ERROR] Scan failed: {str(e)}"],
             )
 
+    # Async worker that clones or extracts a repo, runs the pipeline, and saves results to MongoDB
     async def _run_repository_scan(
         self,
         scan_id: str,
@@ -758,6 +774,7 @@ class ScanService:
             if temp_root:
                 shutil.rmtree(temp_root, ignore_errors=True)
 
+    # Reads scan progress and state from MongoDB
     async def status(self, scan_id: str) -> ScanStatusRead:
         scan = await self.db.scans.find_one({"scan_id": scan_id})
         if not scan:
@@ -789,12 +806,14 @@ class ScanService:
             updated_at=scan.get("updated_at"),
         )
 
+    # Returns the last 100 log lines for a scan
     async def logs(self, scan_id: str) -> Dict[str, Any]:
         scan = await self.db.scans.find_one({"scan_id": scan_id}, {"logs": {"$slice": -100}})
         if not scan:
             return {"logs": []}
         return {"logs": scan.get("logs", [])}
 
+    # Returns the completed scan summary with patch status merged into each vulnerability
     async def summary(self, scan_id: str) -> Optional[ScanSummary]:
         scan = await self.db.scans.find_one({"scan_id": scan_id})
         if not scan:
@@ -847,6 +866,7 @@ class ScanService:
         }
         return ScanSummary(**merged)
 
+    # Sets scan state to CANCELLED in MongoDB
     async def cancel(self, scan_id: str) -> Dict[str, Any]:
         scan = await self.db.scans.find_one({"scan_id": scan_id})
         if not scan:
@@ -858,6 +878,7 @@ class ScanService:
         )
         return {"state": "CANCELLED"}
 
+    # Checks that the user owns the scan or has admin role
     async def ensure_access(self, scan_id: str, user: dict) -> bool:
         scan = await self.db.scans.find_one({"scan_id": scan_id})
         if not scan:

@@ -91,6 +91,7 @@ class RoleAwareLLMPool:
       next call, avoiding the cascade overhead on hot paths.
     """
 
+    # Initializes provider list, exhaustion tracking, sticky model, and rate-limit state
     def __init__(
         self,
         role: str,
@@ -138,6 +139,7 @@ class RoleAwareLLMPool:
 
     # ── Provider list construction ────────────────────────────────────────────
 
+    # Builds ordered provider list from env override or role defaults, skipping missing keys
     def _build_providers(self) -> list[dict]:
         override = os.getenv(f"VULCAN_{self.role.upper()}_MODELS")
         if override:
@@ -159,6 +161,7 @@ class RoleAwareLLMPool:
                 providers.append(self._make_entry(cfg["provider"], cfg["model"], key))
         return providers
 
+    # Returns API key for a given provider name from environment variables
     @staticmethod
     def _resolve_key(provider: str) -> Optional[str]:
         return {
@@ -167,6 +170,7 @@ class RoleAwareLLMPool:
             "openai": os.getenv("OPENAI_API_KEY"),
         }.get(provider)
 
+    # Creates a provider dict with id, model, api_key, and base_url
     @staticmethod
     def _make_entry(provider: str, model: str, api_key: str) -> dict:
         base_url = (
@@ -182,6 +186,7 @@ class RoleAwareLLMPool:
             "base_url": base_url,
         }
 
+    # Creates an AsyncOpenAI client with retries disabled so the pool controls fallback
     def _make_client(self, cfg: dict):
         from openai import AsyncOpenAI
         # max_retries=0: disable SDK auto-retry so our pool controls all retry/fallback logic.
@@ -193,6 +198,7 @@ class RoleAwareLLMPool:
 
     # ── Rate limiter ──────────────────────────────────────────────────────────
 
+    # Enforces minimum interval between LLM calls using an async lock
     async def _throttle(self) -> None:
         if self._rate_lock is None:
             self._rate_lock = asyncio.Lock()
@@ -253,6 +259,7 @@ class RoleAwareLLMPool:
 
         return None
 
+    # Calls one provider, handles rate-limit retry, and marks provider exhausted on failure
     async def _try_provider(
         self,
         cfg: dict,
@@ -325,6 +332,7 @@ class RoleAwareLLMPool:
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
+    # Returns True if at least one non-exhausted provider remains
     @property
     def is_available(self) -> bool:
         return any(p["id"] not in self._exhausted for p in self._providers)

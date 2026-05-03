@@ -15,6 +15,7 @@ class PatchValidator:
     Validates diff format, syntax, and semantic rules.
     """
 
+    # Runs 5-stage validation pipeline (diff_format → syntax → apply_diff → semantic → AST) and returns results
     def validate(self, ctx: VulnerabilityContext, unified_diff: str) -> List[ValidationResult]:
         validations: List[ValidationResult] = []
 

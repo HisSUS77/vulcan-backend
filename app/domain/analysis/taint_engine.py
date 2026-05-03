@@ -11,6 +11,7 @@ class TaintEngine:
     Identifies sources, sinks, and traces data flow paths between them.
     """
     
+    # Initializes the engine with default taint source and sink rule sets.
     def __init__(self):
         self.sources = self._default_sources()
         self.sinks = self._default_sinks()

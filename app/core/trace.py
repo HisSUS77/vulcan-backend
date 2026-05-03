@@ -9,6 +9,7 @@ _counter = count(1)
 _lock = threading.Lock()
 
 
+# Returns True when the VULCAN_TRACE environment variable is set to a truthy value
 def _enabled() -> bool:
     value = (os.getenv("VULCAN_TRACE") or "").strip().lower()
     return value in {"1", "true", "yes", "on"}

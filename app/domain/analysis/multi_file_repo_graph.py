@@ -112,6 +112,7 @@ class GlobalSymbolTable:
     - Symbol-to-location mappings
     """
     
+    # Initializes empty dicts for modules, symbols, file mappings, and import cache
     def __init__(self):
         # Module name → ModuleDefinition
         self.modules: Dict[str, ModuleDefinition] = {}
@@ -291,6 +292,7 @@ class RepositoryScanner:
     - HTML/templates (.html, .htm, .jinja, .j2, .ejs, .hbs, .handlebars, .mustache, .pug)
     """
     
+    # Sets repo path and default exclusion patterns
     def __init__(self, repo_path: str, exclude_patterns: Optional[List[str]] = None):
         self.repo_path = Path(repo_path)
         self.exclude_patterns = exclude_patterns or [
@@ -356,12 +358,14 @@ class RepositoryScanner:
 class GraphCache:
     """On-disk cache for per-file graphs keyed by content hash."""
 
+    # Sets up on-disk cache directory and size/entry limits
     def __init__(self, repo_path: str):
         self.cache_dir = Path(repo_path) / ".vulcan_cache" / "graphs"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_entries = int(os.getenv("VULCAN_CACHE_MAX_FILES", "5000"))
         self.max_mb = int(os.getenv("VULCAN_CACHE_MAX_MB", "200"))
 
+    # Returns SHA-256 hash of file content + language for cache keying
     def _hash(self, content: str, language: str) -> str:
         h = hashlib.sha256()
         h.update(language.encode("utf-8"))
@@ -369,6 +373,7 @@ class GraphCache:
         h.update(content.encode("utf-8", errors="ignore"))
         return h.hexdigest()
 
+    # Loads and deserializes a cached SemanticGraph if available
     def get(self, file_path: Path, content: str, language: str) -> Optional[SemanticGraph]:
         key = self._hash(content, language)
         cache_file = self.cache_dir / f"{key}.json"
@@ -386,6 +391,7 @@ class GraphCache:
         except Exception:
             return None
 
+    # Serializes and writes a SemanticGraph to the cache, then prunes
     def set(self, file_path: Path, content: str, language: str, graph: SemanticGraph):
         key = self._hash(content, language)
         cache_file = self.cache_dir / f"{key}.json"
@@ -445,6 +451,7 @@ class ImportExportResolver:
     - JavaScript: import, export, require, module.exports
     """
     
+    # Stores CPG, file path, language, and re-export module list
     def __init__(self, cpg: SemanticGraph, file_path: str, language: str):
         self.cpg = cpg
         self.file_path = file_path
@@ -1154,10 +1161,11 @@ class CrossFileLinker:
     - MODULE_REF: Module reference edge
     """
     
+    # Stores symbol table reference and empty cross-file edge list
     def __init__(self, global_symbol_table: GlobalSymbolTable):
         self.symbol_table = global_symbol_table
         self.cross_file_edges: List[GraphEdge] = []
-    
+
     def link_imports_to_exports(self):
         """Create edges from imports to their exported definitions"""
         for module in self.symbol_table.modules.values():
@@ -1394,6 +1402,7 @@ class MultiFileRepositoryGraph:
     6. Multi-file DFG construction
     """
     
+    # Sets up scanner, symbol table, parser, cache, and shared node/edge lists
     def __init__(
         self,
         repo_path: str,

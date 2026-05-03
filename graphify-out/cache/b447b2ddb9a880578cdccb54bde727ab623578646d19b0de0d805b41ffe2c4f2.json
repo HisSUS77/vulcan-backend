@@ -1,0 +1,1 @@
+{"nodes": [{"id": "d_final_vulcan_vulcan_backend_security_javascript_cwe_022_taintedpath_tainted_access_paths_js", "label": "tainted-access-paths.js", "file_type": "code", "source_file": "D:\\final\\Vulcan\\vulcan-backend\\Security_ javascript\\CWE-022\\TaintedPath\\tainted-access-paths.js", "source_location": "L1"}], "edges": [], "raw_calls": []}
