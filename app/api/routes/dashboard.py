@@ -97,16 +97,14 @@ async def recent_scans(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
     session: AsyncSession = Depends(get_db),
 ):
+    is_admin = user.get("role") == UserRole.ADMIN.value
     query = {}
-    if user.get("role") != UserRole.ADMIN.value:
+    if not is_admin:
         object_id = to_object_id(user.get("id", ""))
-        if object_id:
-            query["user_id"] = object_id
-        else:
-            query["user_id"] = None
+        query["user_id"] = object_id if object_id else None
 
-    cursor = db.scans.find(query).sort("created_at", -1).limit(5)
-    scans = await cursor.to_list(length=5)
+    cursor = db.scans.find(query).sort("created_at", -1).limit(200)
+    scans = await cursor.to_list(length=200)
 
     repo_ids = [scan.get("repo_id") for scan in scans if scan.get("repo_id")]
     repo_map = {}
@@ -114,10 +112,20 @@ async def recent_scans(
         result = await session.execute(select(Repository).where(Repository.id.in_(repo_ids)))
         repo_map = {repo.id: repo.name for repo in result.scalars().all()}
 
+    user_map = {}
+    if is_admin:
+        user_oids = list({scan.get("user_id") for scan in scans if scan.get("user_id")})
+        if user_oids:
+            u_cursor = db.users.find({"_id": {"$in": user_oids}}, {"full_name": 1, "email": 1})
+            async for u in u_cursor:
+                uid = str(u["_id"])
+                user_map[uid] = u.get("full_name") or u.get("email") or uid
+
     items = []
     for scan in scans:
         summary = scan.get("summary") or {}
         repo_id = scan.get("repo_id")
+        uid = str(scan.get("user_id")) if scan.get("user_id") else None
         items.append(
             {
                 "scan_id": scan.get("scan_id"),
@@ -126,6 +134,7 @@ async def recent_scans(
                 "status": scan.get("state"),
                 "created_at": summary.get("created_at") or scan.get("created_at"),
                 "vulnerabilities_found": summary.get("vulnerabilities_found", 0),
+                "scanned_by": user_map.get(uid) if is_admin and uid else None,
             }
         )
     return items
