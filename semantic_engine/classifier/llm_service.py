@@ -88,7 +88,7 @@ class LLMService:
             role="detection",
             timeout=int(os.getenv("LLM_CLASSIFIER_TIMEOUT", "20")),
             system_prompt=self._load_system_prompt(),
-            min_interval_ms=int(os.getenv("LLM_MIN_INTERVAL_MS", "2000")),
+            min_interval_ms=int(os.getenv("LLM_MIN_INTERVAL_MS", "500")),
         )
         self._response_cache: Dict[str, LLMClassificationResult] = {}
         logger.info("LLMService (detection) initialized")

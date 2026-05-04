@@ -87,112 +87,119 @@ class SliceClassifier:
     Classifies code slices using LLM to validate static analysis findings.
     Combines pattern-based detection with AI reasoning.
     """
-    
+
     def __init__(self, enable_llm: bool = True):
-        """
-        Initialize classifier.
-        
-        Args:
-            enable_llm: Whether to use LLM classification (True) or skip it (False)
-        """
         self.enable_llm = enable_llm
         self.llm_service = get_llm_service() if enable_llm else None
-        
         logger.info(f"SliceClassifier initialized (LLM: {enable_llm})")
     
     async def classify_slices(
         self, slices: List[CodeSlice]
     ) -> List[ClassifiedVulnerability]:
         """
-        Classify multiple code slices.
+        Classify multiple code slices concurrently.
 
-        Args:
-            slices: List of code slices from query executor
-
-        Returns:
-            List of classified vulnerabilities
+        Spawns LLM_CLASSIFIER_WORKERS independent worker tasks, each with its own
+        LLMService instance (own pool + rate limiter), so they run in true parallel.
+        When one worker's pool is exhausted it falls back to static; the others
+        continue unaffected with their own model cascades.
         """
+        import asyncio
         import os
+        from semantic_engine.classifier.llm_service import LLMService
 
-        # Reset soft (scraping/rate) exhaustions at the start of each scan batch
-        # so GitHub Models are retried even if a prior scan got scraping-blocked.
-        if self.llm_service and hasattr(self.llm_service, '_pool'):
-            self.llm_service._pool.reset_soft_exhausted()
-
-        # Cap applies only to taint-flow slices; presence-rule slices bypass LLM anyway.
-        # Default raised to 100 — pool exhaustion tracking handles quota, not this cap.
-        max_llm_calls = int(os.getenv("MAX_LLM_DETECTION_CALLS", "100"))
-
-        _conf_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
-        _FALLBACK_EXPLANATION = "LLM unavailable — pattern-based detection only"
+        max_llm_calls  = int(os.getenv("MAX_LLM_DETECTION_CALLS", "100"))
+        n_workers      = int(os.getenv("LLM_CLASSIFIER_WORKERS", "3"))
+        _FALLBACK_EXPL = "LLM unavailable — pattern-based detection only"
+        _conf_rank     = {"critical": 4, "high": 3, "medium": 2, "low": 1}
 
         def _needs_llm(s: "CodeSlice") -> bool:
             return not (s.pattern_type == "REGEX" and s.rule_id in _PRESENCE_VULN_RULES)
 
-        def _pool_available() -> bool:
-            return (
-                self.llm_service is not None
-                and hasattr(self.llm_service, "_pool")
-                and self.llm_service._pool.is_available
-            )
-
-        llm_budget = max_llm_calls
-        llm_succeeded = 0
-        llm_attempted = 0
-        pool_exhausted = False
-        classified = []
-
-        # Sort slices so high-confidence taint-flow slices get LLM first
+        # Sort: high-severity taint-flow slices first so they claim LLM budget
         sorted_slices = sorted(
             slices,
             key=lambda s: _conf_rank.get((s.confidence or "").lower(), 0),
             reverse=True,
         )
 
-        for slice_obj in sorted_slices:
-            needs_llm = _needs_llm(slice_obj)
+        # Separate slices that need LLM from those that don't
+        llm_slices    = [s for s in sorted_slices if _needs_llm(s)]
+        static_slices = [s for s in sorted_slices if not _needs_llm(s)]
 
-            # Fast path: presence rules never need LLM
-            if not needs_llm:
-                result = await self.classify_slice(slice_obj)
-                if result:
-                    classified.append(result)
-                continue
+        # ── Static slices (presence rules) — no LLM needed ───────────────────
+        static_results: List[ClassifiedVulnerability] = []
+        for s in static_slices:
+            r = await self.classify_slice(s)
+            if r:
+                static_results.append(r)
 
-            # If pool is exhausted or budget spent, use static fallback immediately
-            if pool_exhausted or llm_budget <= 0:
-                result = self._fallback_classify(slice_obj)
-                if result:
-                    classified.append(result)
-                continue
+        # ── LLM slices — concurrent workers ──────────────────────────────────
+        # Shared queue and counters (protected by asyncio single-thread model)
+        queue: asyncio.Queue = asyncio.Queue()
+        for s in llm_slices[:max_llm_calls]:
+            await queue.put(s)
+        # Slices beyond budget go straight to static fallback
+        over_budget = llm_slices[max_llm_calls:]
 
-            # Attempt LLM classification
-            llm_attempted += 1
-            result = await self.classify_slice(slice_obj)
+        llm_results: List[Optional[ClassifiedVulnerability]] = []
+        counters = {"succeeded": 0, "attempted": 0}
 
-            # Check if LLM actually responded or fell back to static
-            if result and result.llm_explanation != _FALLBACK_EXPLANATION:
-                # LLM responded — count against budget
-                llm_budget -= 1
-                llm_succeeded += 1
-            else:
-                # LLM returned static fallback — provider failed or pool empty
-                # Do NOT decrement budget; check if pool is now exhausted
-                if not _pool_available():
-                    pool_exhausted = True
-                    logger.warning(
-                        "[classifier] LLM pool exhausted mid-scan — "
-                        f"remaining {len(sorted_slices) - llm_attempted} slices will use static analysis"
-                    )
+        async def _worker(worker_id: int) -> None:
+            # Each worker gets its own LLMService (own pool + rate limiter)
+            svc = LLMService()
+            svc._pool.reset_soft_exhausted()
+            pool_dead = False
 
-            if result:
-                classified.append(result)
+            while True:
+                try:
+                    slice_obj = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
+                if pool_dead:
+                    r = self._fallback_classify(slice_obj)
+                    if r:
+                        llm_results.append(r)
+                    queue.task_done()
+                    continue
+
+                counters["attempted"] += 1
+
+                # Classify using this worker's private LLM service
+                r = await self._classify_with_service(slice_obj, svc)
+                if r and r.llm_explanation != _FALLBACK_EXPL:
+                    counters["succeeded"] += 1
+                else:
+                    if not svc._pool.is_available:
+                        pool_dead = True
+                        logger.warning(
+                            f"[classifier:worker-{worker_id}] pool exhausted — "
+                            "remaining queue items will use static analysis"
+                        )
+
+                if r:
+                    llm_results.append(r)
+                queue.task_done()
+
+        actual_workers = min(n_workers, len(llm_slices)) if llm_slices else 0
+        if actual_workers:
+            await asyncio.gather(*[_worker(i) for i in range(actual_workers)])
+
+        # Over-budget slices — static only
+        for s in over_budget:
+            r = self._fallback_classify(s)
+            if r:
+                llm_results.append(r)
+
+        classified = static_results + [r for r in llm_results if r is not None]
         logger.info(
-            f"Classified {len(classified)} vulnerabilities "
-            f"(LLM succeeded: {llm_succeeded}/{llm_attempted} attempted, "
-            f"budget remaining: {llm_budget}/{max_llm_calls}, "
-            f"slices total: {len(slices)})"
+            f"Classified {len(classified)} vulnerabilities | "
+            f"workers={actual_workers} | "
+            f"LLM succeeded={counters['succeeded']}/{counters['attempted']} | "
+            f"static={len(static_results)} | "
+            f"over-budget={len(over_budget)} | "
+            f"total slices={len(slices)}"
         )
 
         # Sort by final severity and confidence
@@ -237,18 +244,58 @@ class SliceClassifier:
             is_vulnerable=is_vulnerable,
         )
     
+    async def _classify_with_service(
+        self, slice_obj: "CodeSlice", svc
+    ) -> Optional["ClassifiedVulnerability"]:
+        """Classify one slice using an explicitly supplied LLMService instance."""
+        if slice_obj.pattern_type == "REGEX" and slice_obj.rule_id in _PRESENCE_VULN_RULES:
+            llm_result = self._get_static_only_result(slice_obj)
+        elif self.enable_llm and svc:
+            llm_result = await svc.classify_code_slice(
+                code_snippet=slice_obj.code_snippet,
+                rule_name=slice_obj.rule_name,
+                rule_description=slice_obj.reason,
+                source_label=slice_obj.source_label,
+                sink_label=slice_obj.sink_label,
+                owasp=slice_obj.owasp,
+                cwe=slice_obj.cwe,
+            )
+        else:
+            llm_result = self._get_static_only_result(slice_obj)
+
+        if llm_result.classification != Classification.SAFE and \
+                self._code_is_safe(slice_obj.rule_id, slice_obj.code_snippet):
+            from semantic_engine.classifier.llm_service import LLMClassificationResult as _R
+            llm_result = _R(
+                classification=Classification.SAFE,
+                explanation="Safe pattern detected: parameterized query / list args / allowlist / static template.",
+                severity="low", exploitability_score=0.0,
+                remediation="No action required.", cwe=slice_obj.cwe,
+                owasp=slice_obj.owasp, confidence=0.95,
+            )
+
+        final_severity, final_confidence, is_vulnerable = self._combine_results(slice_obj, llm_result)
+        if not is_vulnerable:
+            return None
+        return ClassifiedVulnerability(
+            slice_id=slice_obj.slice_id, rule_id=slice_obj.rule_id,
+            rule_name=slice_obj.rule_name, owasp=slice_obj.owasp, cwe=slice_obj.cwe,
+            code_snippet=slice_obj.code_snippet, location=slice_obj.location,
+            source_label=slice_obj.source_label, sink_label=slice_obj.sink_label,
+            path_nodes=slice_obj.path_nodes, static_severity=slice_obj.severity,
+            static_confidence=slice_obj.confidence, pattern_type=slice_obj.pattern_type,
+            static_reason=slice_obj.reason, llm_classification=llm_result.classification,
+            llm_explanation=llm_result.explanation, llm_severity=llm_result.severity,
+            llm_exploitability=llm_result.exploitability_score,
+            llm_remediation=llm_result.remediation, llm_confidence=llm_result.confidence,
+            final_severity=final_severity, final_confidence=final_confidence,
+            is_vulnerable=is_vulnerable,
+        )
+
     async def classify_slice(
         self, slice_obj: CodeSlice
     ) -> Optional[ClassifiedVulnerability]:
-        """
-        Classify a single code slice.
-        
-        Args:
-            slice_obj: Code slice to classify
-        
-        Returns:
-            ClassifiedVulnerability or None if filtered out
-        """
+        """Classify a single code slice using the default shared LLM service."""
         if slice_obj.pattern_type == "REGEX" and slice_obj.rule_id in _PRESENCE_VULN_RULES:
             llm_result = self._get_static_only_result(slice_obj)
         elif self.enable_llm and self.llm_service:
