@@ -47,14 +47,17 @@ _GROQ_BASE   = "https://api.groq.com/openai/v1"
 ROLE_DEFAULTS: dict[str, list[dict]] = {
     "detection": [
         # GitHub Models free tier — fast, structured classification
-        {"provider": "github", "model": "meta/Llama-4-Scout-17B-16E-Instruct",      "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "openai/gpt-4.1-mini",                      "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "microsoft/Phi-4",                          "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "mistral-ai/mistral-small-2503",            "key_env": "GITHUB_LLM_API_KEY"},
-        # Groq free tier — generous throughput
-        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                  "key_env": "LLM_API_KEY"},
-        # GitHub gpt-4.1 as final fallback (strongest free model)
-        {"provider": "github", "model": "openai/gpt-4.1",                           "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "meta/Llama-4-Scout-17B-16E-Instruct",         "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/gpt-4.1-mini",                         "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "microsoft/Phi-4",                             "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "mistral-ai/mistral-small-2503",               "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/gpt-4.1",                              "key_env": "GITHUB_LLM_API_KEY"},
+        # Groq free tier — independent quota, kicks in when GitHub is exhausted/blocked
+        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                     "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct",   "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "meta-llama/llama-4-maverick-17b-128e-instruct","key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "llama-3.1-8b-instant",                        "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "gemma2-9b-it",                                "key_env": "LLM_API_KEY"},
     ],
     "exploit": [
         # Groq Compound — web search + code execution; CRITICAL findings only (paid per-call)
