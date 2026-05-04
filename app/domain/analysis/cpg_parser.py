@@ -149,8 +149,8 @@ class CPGParser:
 
         loaded_any = False
 
-        # Prefer the stable tree_sitter_languages fallback first because it works
-        # reliably with the pinned tree-sitter stack in this workspace.
+        # Prefer the legacy tree_sitter_languages API when it is compatible with
+        # the installed tree-sitter runtime.
         try:
             from tree_sitter_languages import get_language
 
@@ -172,9 +172,33 @@ class CPGParser:
         except Exception as fallback_exc:
             logger.debug(f"tree_sitter_languages fallback unavailable: {fallback_exc}")
 
-        # The workspace uses tree_sitter_languages successfully; avoid probing
-        # the direct per-package API because the constructor signatures differ
-        # across tree-sitter releases and create noisy non-fatal failures.
+        # For newer tree-sitter wheels (like 0.25.x), use the dedicated grammar
+        # packages. These expose PyCapsules that can be wrapped by Language(...).
+        package_loaders = {
+            LanguageType.PYTHON: ("tree_sitter_python", "language"),
+            LanguageType.JAVASCRIPT: ("tree_sitter_javascript", "language"),
+            LanguageType.TYPESCRIPT: ("tree_sitter_typescript", "language_typescript"),
+        }
+
+        for lang, (module_name, attr_name) in package_loaders.items():
+            if lang in self.parsers:
+                continue
+            try:
+                module = __import__(module_name, fromlist=[attr_name])
+                capsule_fn = getattr(module, attr_name)
+                language = Language(capsule_fn())
+                self.languages[lang] = language
+                self.parsers[lang] = _create_parser(language)
+                loaded_any = True
+                logger.info(f"Loaded {lang.value} grammar via {module_name}")
+            except Exception as package_exc:
+                logger.debug(f"Direct grammar load failed for {lang.value}: {package_exc}")
+
+        if not loaded_any:
+            logger.warning(
+                "No Tree-sitter grammars loaded. Install compatible parser packages "
+                "or pin tree-sitter to the versions documented by this project."
+            )
 
     def _normalize_language(self, language: LanguageType | str) -> Optional[LanguageType]:
         """Normalize language input to LanguageType enum."""
