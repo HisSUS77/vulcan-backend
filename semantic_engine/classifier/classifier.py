@@ -149,35 +149,41 @@ class SliceClassifier:
             # Each worker gets its own LLMService (own pool + rate limiter)
             svc = LLMService()
             svc._pool.reset_soft_exhausted()
-            pool_dead = False
 
             while True:
+                # Check pool BEFORE pulling — dead worker stops consuming so
+                # live workers can handle the remaining queue items instead.
+                if not svc._pool.is_available:
+                    logger.warning(
+                        f"[classifier:worker-{worker_id}] pool exhausted — "
+                        "releasing remaining queue items to live workers"
+                    )
+                    break
+
                 try:
                     slice_obj = queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
 
-                if pool_dead:
-                    r = self._fallback_classify(slice_obj)
-                    if r:
-                        llm_results.append(r)
-                    queue.task_done()
-                    continue
-
                 counters["attempted"] += 1
 
-                # Classify using this worker's private LLM service
                 r = await self._classify_with_service(slice_obj, svc)
                 if r and r.llm_explanation != _FALLBACK_EXPL:
                     counters["succeeded"] += 1
-                else:
-                    if not svc._pool.is_available:
-                        pool_dead = True
-                        logger.warning(
-                            f"[classifier:worker-{worker_id}] pool exhausted — "
-                            "remaining queue items will use static analysis"
-                        )
 
+                if r:
+                    llm_results.append(r)
+                queue.task_done()
+
+        # Fallback worker — runs after all LLM workers finish, handles any
+        # items left in the queue because all LLM workers exhausted their pools.
+        async def _fallback_worker() -> None:
+            while True:
+                try:
+                    slice_obj = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                r = self._fallback_classify(slice_obj)
                 if r:
                     llm_results.append(r)
                 queue.task_done()
@@ -185,6 +191,9 @@ class SliceClassifier:
         actual_workers = min(n_workers, len(llm_slices)) if llm_slices else 0
         if actual_workers:
             await asyncio.gather(*[_worker(i) for i in range(actual_workers)])
+
+        # Drain any items left behind by exhausted workers using static fallback
+        await _fallback_worker()
 
         # Over-budget slices — static only
         for s in over_budget:
