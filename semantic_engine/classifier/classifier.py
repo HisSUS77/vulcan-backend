@@ -119,20 +119,30 @@ class SliceClassifier:
         if self.llm_service and hasattr(self.llm_service, '_pool'):
             self.llm_service._pool.reset_soft_exhausted()
 
-        # Cap LLM calls per scan to conserve free-tier quota.
-        # Presence-rule slices bypass LLM anyway; this cap only affects taint-flow slices.
-        # Slices beyond the cap are treated as LIKELY_VULNERABLE (same as LLM unavailable).
-        max_llm_calls = int(os.getenv("MAX_LLM_DETECTION_CALLS", "20"))
+        # Cap applies only to taint-flow slices; presence-rule slices bypass LLM anyway.
+        # Default raised to 100 — pool exhaustion tracking handles quota, not this cap.
+        max_llm_calls = int(os.getenv("MAX_LLM_DETECTION_CALLS", "100"))
 
         _conf_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+        _FALLBACK_EXPLANATION = "LLM unavailable — pattern-based detection only"
 
         def _needs_llm(s: "CodeSlice") -> bool:
             return not (s.pattern_type == "REGEX" and s.rule_id in _PRESENCE_VULN_RULES)
 
+        def _pool_available() -> bool:
+            return (
+                self.llm_service is not None
+                and hasattr(self.llm_service, "_pool")
+                and self.llm_service._pool.is_available
+            )
+
         llm_budget = max_llm_calls
+        llm_succeeded = 0
+        llm_attempted = 0
+        pool_exhausted = False
         classified = []
 
-        # Sort slices so high-confidence taint-flow slices consume the LLM budget first
+        # Sort slices so high-confidence taint-flow slices get LLM first
         sorted_slices = sorted(
             slices,
             key=lambda s: _conf_rank.get((s.confidence or "").lower(), 0),
@@ -140,24 +150,49 @@ class SliceClassifier:
         )
 
         for slice_obj in sorted_slices:
-            if _needs_llm(slice_obj):
-                if llm_budget > 0:
-                    llm_budget -= 1
-                else:
-                    # Budget exhausted — skip LLM, use static fallback directly
-                    result = self._fallback_classify(slice_obj)
-                    if result:
-                        classified.append(result)
-                    continue
+            needs_llm = _needs_llm(slice_obj)
 
+            # Fast path: presence rules never need LLM
+            if not needs_llm:
+                result = await self.classify_slice(slice_obj)
+                if result:
+                    classified.append(result)
+                continue
+
+            # If pool is exhausted or budget spent, use static fallback immediately
+            if pool_exhausted or llm_budget <= 0:
+                result = self._fallback_classify(slice_obj)
+                if result:
+                    classified.append(result)
+                continue
+
+            # Attempt LLM classification
+            llm_attempted += 1
             result = await self.classify_slice(slice_obj)
+
+            # Check if LLM actually responded or fell back to static
+            if result and result.llm_explanation != _FALLBACK_EXPLANATION:
+                # LLM responded — count against budget
+                llm_budget -= 1
+                llm_succeeded += 1
+            else:
+                # LLM returned static fallback — provider failed or pool empty
+                # Do NOT decrement budget; check if pool is now exhausted
+                if not _pool_available():
+                    pool_exhausted = True
+                    logger.warning(
+                        "[classifier] LLM pool exhausted mid-scan — "
+                        f"remaining {len(sorted_slices) - llm_attempted} slices will use static analysis"
+                    )
+
             if result:
                 classified.append(result)
 
-        llm_used = max_llm_calls - llm_budget
         logger.info(
             f"Classified {len(classified)} vulnerabilities "
-            f"(LLM used: {llm_used}/{max_llm_calls}, slices total: {len(slices)})"
+            f"(LLM succeeded: {llm_succeeded}/{llm_attempted} attempted, "
+            f"budget remaining: {llm_budget}/{max_llm_calls}, "
+            f"slices total: {len(slices)})"
         )
 
         # Sort by final severity and confidence
