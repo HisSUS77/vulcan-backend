@@ -150,9 +150,22 @@ async def get_attack_surface(
     for n in nodes:
         risk_counts[n["risk"]] = risk_counts.get(n["risk"], 0) + 1
 
+    severity_counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for v in all_vulns:
+        sev = (v.get("severity") or "").lower()
+        if sev in severity_counts:
+            severity_counts[sev] += 1
+
     return {
         "scan_id": scan_id,
         "nodes":   nodes,
         "edges":   edges,
-        "stats":   {"total": len(nodes), **risk_counts},
+        "stats":   {
+            "total": len(nodes),
+            "total_nodes": len(nodes),
+            "total_vulnerabilities": len(all_vulns),
+            "total_edges": len(edges),
+            **severity_counts,
+            "node_risk_counts": risk_counts,
+        },
     }

@@ -357,7 +357,17 @@ class ScanService:
             edge for edge in graph_data.get("edges", [])
             if edge.get("source") in node_ids and edge.get("target") in node_ids
         ]
-        return {"nodes": nodes, "edges": edges}
+        source_content = ""
+        try:
+            source_content = (repo_root / rel_path).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            try:
+                source_content = (repo_root / rel_path).read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                source_content = ""
+        except Exception:
+            source_content = ""
+        return {"nodes": nodes, "edges": edges, "source_content": source_content}
 
     # Extracts a ZIP or TAR archive to the destination directory
     def _extract_archive(self, archive_path: Path, dest_dir: Path) -> None:
@@ -512,6 +522,10 @@ class ScanService:
                     "vulnerabilities": vulnerabilities,
                 }
 
+                stored_graph_data = dict(result.graph_data or {"nodes": [], "edges": []})
+                stored_graph_data["source_content"] = code
+                stored_graph_data["file_path"] = filename
+
                 await self._update_scan(
                     scan_id,
                     {
@@ -522,7 +536,7 @@ class ScanService:
                         "vulnerabilities": vulnerabilities,
                         "files_scanned": 1,
                         "total_files": 1,
-                        "graph_data": result.graph_data,
+                        "graph_data": stored_graph_data,
                     },
                     [
                         f"[INFO] Graph built: {result.graph_nodes} nodes, {result.graph_edges} edges",
