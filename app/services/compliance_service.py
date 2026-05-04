@@ -150,16 +150,19 @@ class ComplianceService:
                     categories[cat]["status"] = "WARN"
 
         passed = sum(1 for c in categories.values() if c["status"] == "PASS")
+        warnings = sum(1 for c in categories.values() if c["status"] == "WARN")
+        total = len(categories)
+        score = round((passed + warnings * 0.5) / total * 100) if total else 0
         return {
             "framework": "OWASP Top 10 2021",
             "scan_id": scan_id,
             "generated_at": datetime.utcnow().isoformat(),
             "summary": {
-                "total_controls": len(categories),
+                "total_controls": total,
                 "passed": passed,
                 "failed": sum(1 for c in categories.values() if c["status"] == "FAIL"),
-                "warnings": sum(1 for c in categories.values() if c["status"] == "WARN"),
-                "score": round(passed / len(categories) * 100),
+                "warnings": warnings,
+                "score": score,
             },
             "controls": list(categories.values()),
         }
@@ -196,16 +199,19 @@ class ComplianceService:
             })
 
         passed = sum(1 for c in controls if c["status"] == "PASS")
+        warnings = sum(1 for c in controls if c["status"] == "WARN")
+        total = len(controls)
+        score = round((passed + warnings * 0.5) / total * 100) if total else 0
         return {
             "framework": "PCI-DSS 4.0",
             "scan_id": scan_id,
             "generated_at": datetime.utcnow().isoformat(),
             "summary": {
-                "total_controls": len(controls),
+                "total_controls": total,
                 "passed": passed,
                 "failed": sum(1 for c in controls if c["status"] == "FAIL"),
-                "warnings": sum(1 for c in controls if c["status"] == "WARN"),
-                "score": round(passed / len(controls) * 100),
+                "warnings": warnings,
+                "score": score,
             },
             "controls": controls,
         }
@@ -242,16 +248,19 @@ class ComplianceService:
             })
 
         passed = sum(1 for c in controls if c["status"] == "PASS")
+        warnings = sum(1 for c in controls if c["status"] == "WARN")
+        total = len(controls)
+        score = round((passed + warnings * 0.5) / total * 100) if total else 0
         return {
             "framework": "SOC2 Type II (Trust Service Criteria)",
             "scan_id": scan_id,
             "generated_at": datetime.utcnow().isoformat(),
             "summary": {
-                "total_controls": len(controls),
+                "total_controls": total,
                 "passed": passed,
                 "failed": sum(1 for c in controls if c["status"] == "FAIL"),
-                "warnings": sum(1 for c in controls if c["status"] == "WARN"),
-                "score": round(passed / len(controls) * 100),
+                "warnings": warnings,
+                "score": score,
             },
             "controls": controls,
         }
