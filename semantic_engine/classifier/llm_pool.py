@@ -7,13 +7,14 @@ Three fixed roles, each with a tailored model priority list:
                Llama-4-Scout → gpt-4.1-mini → Phi-4 → mistral-small-2503 → Groq Llama-3.3 → gpt-4.1
 
   exploit    – best coders; runs ONLY on HIGH/CRITICAL confirmed vulns (low volume)
-               DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → Groq qwen-qwq-32b → Groq llama-3.3 → gpt-4.1-mini
+               Groq Compound [CRITICAL only] → DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → Groq llama-3.3 → gpt-4.1-mini
+               Groq Compound uses web search + code execution for richer CRITICAL PoCs (has per-call cost).
 
   patch      – quality-first; runs once per approved patch request
-               DeepSeek-V3 → gpt-4.1 → Llama-4-Maverick-FP8 → Groq qwen-qwq-32b → Groq llama-3.3 → o4-mini
+               DeepSeek-V3 → gpt-4.1 → Llama-4-Maverick-FP8 → Groq llama-3.3 → o4-mini
 
   All models use GitHub Models free tier (GITHUB_LLM_API_KEY) or Groq free tier (GROQ_API_KEY).
-  No paid OpenAI API calls — zero cost.
+  Groq Compound (exploit/CRITICAL) is paid — billed per token + per web-search request.
 
 Override any role's cascade via env var (semicolon-separated provider:model pairs):
   VULCAN_DETECTION_MODELS=github:gpt-4o-mini;groq:llama-3.3-70b-versatile
@@ -22,7 +23,7 @@ Override any role's cascade via env var (semicolon-separated provider:model pair
 
 Required env vars (set whichever providers you have):
   GITHUB_LLM_API_KEY   – GitHub Personal Access Token (free tier)
-  GROQ_API_KEY         – Groq API key  (also accepted as LLM_API_KEY for patch)
+  GROQ_API_KEY         – Groq API key  (also accepted as LLM_API_KEY for patch/exploit)
   OPENAI_API_KEY       – OpenAI API key (paid, highest quality safety net)
 """
 from __future__ import annotations
@@ -56,7 +57,9 @@ ROLE_DEFAULTS: dict[str, list[dict]] = {
         {"provider": "github", "model": "openai/gpt-4.1",                           "key_env": "GITHUB_LLM_API_KEY"},
     ],
     "exploit": [
-        # Best coders — runs only on confirmed HIGH/CRITICAL vulns
+        # Groq Compound — web search + code execution; CRITICAL findings only (paid per-call)
+        {"provider": "groq",   "model": "compound",                                  "key_env": "LLM_API_KEY", "critical_only": True},
+        # Best coders — runs on HIGH/CRITICAL vulns (free tier)
         {"provider": "github", "model": "deepseek/DeepSeek-V3-0324",                "key_env": "GITHUB_LLM_API_KEY"},
         {"provider": "github", "model": "meta/Llama-4-Maverick-17B-128E-Instruct-FP8", "key_env": "GITHUB_LLM_API_KEY"},
         {"provider": "github", "model": "openai/o4-mini",                           "key_env": "GITHUB_LLM_API_KEY"},
@@ -158,7 +161,10 @@ class RoleAwareLLMPool:
         for cfg in ROLE_DEFAULTS[self.role]:
             key = os.getenv(cfg["key_env"])
             if key:
-                providers.append(self._make_entry(cfg["provider"], cfg["model"], key))
+                providers.append(self._make_entry(
+                    cfg["provider"], cfg["model"], key,
+                    critical_only=cfg.get("critical_only", False),
+                ))
         return providers
 
     # Returns API key for a given provider name from environment variables
@@ -170,20 +176,21 @@ class RoleAwareLLMPool:
             "openai": os.getenv("OPENAI_API_KEY"),
         }.get(provider)
 
-    # Creates a provider dict with id, model, api_key, and base_url
+    # Creates a provider dict with id, model, api_key, base_url, and optional critical_only flag
     @staticmethod
-    def _make_entry(provider: str, model: str, api_key: str) -> dict:
+    def _make_entry(provider: str, model: str, api_key: str, critical_only: bool = False) -> dict:
         base_url = (
             _GITHUB_BASE if provider == "github" else
             _GROQ_BASE   if provider == "groq"   else
             None
         )
         return {
-            "id":       f"{provider}:{model}",
-            "provider": provider,
-            "model":    model,
-            "api_key":  api_key,
-            "base_url": base_url,
+            "id":            f"{provider}:{model}",
+            "provider":      provider,
+            "model":         model,
+            "api_key":       api_key,
+            "base_url":      base_url,
+            "critical_only": critical_only,
         }
 
     # Creates an AsyncOpenAI client with retries disabled so the pool controls fallback
@@ -216,13 +223,19 @@ class RoleAwareLLMPool:
         messages: list,
         max_tokens: int = 1000,
         temperature: float = 0.1,
+        severity: str = "",
     ) -> Optional[str]:
         """
         Call the LLM, cascading through providers until one succeeds.
         Returns response text or None when all providers are exhausted.
+
+        severity: when provided, providers marked critical_only are skipped
+                  unless severity == "critical".
         """
         if not self._providers:
             return None
+
+        is_critical = severity.lower() == "critical"
 
         # Log pool state so we can diagnose why providers are skipped
         available_ids = [p["id"] for p in self._providers if p["id"] not in self._exhausted]
@@ -233,12 +246,19 @@ class RoleAwareLLMPool:
                 f"{len(skipped_ids)} exhausted — skipped: {skipped_ids}"
             )
 
-        # Sticky first, then the rest — all skip exhausted entries
+        def _eligible(p: dict) -> bool:
+            if p["id"] in self._exhausted:
+                return False
+            if p.get("critical_only") and not is_critical:
+                return False
+            return True
+
+        # Sticky first, then the rest — all skip exhausted / non-eligible entries
         ordered: list[dict] = []
-        if self._sticky and self._sticky["id"] not in self._exhausted:
+        if self._sticky and _eligible(self._sticky):
             ordered.append(self._sticky)
         for p in self._providers:
-            if p is not self._sticky and p["id"] not in self._exhausted:
+            if p is not self._sticky and _eligible(p):
                 ordered.append(p)
 
         if not ordered:
