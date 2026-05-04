@@ -1,9 +1,29 @@
+from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
+
+
+def _language_from_path(file_path: str | None) -> str:
+    ext = Path(file_path or "").suffix.lower()
+    return {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".java": "java",
+        ".php": "php",
+        ".go": "go",
+        ".rb": "ruby",
+        ".cs": "csharp",
+        ".json": "json",
+        ".html": "html",
+        ".css": "css",
+    }.get(ext, "text")
 
 
 class GraphService:
@@ -133,8 +153,19 @@ class GraphService:
                 "error": "Unsupported graph type",
                 "detail": f"Graph type '{gtype}' not supported. Use AST, CFG, DFG, or CPG."
             }
+        source_content = selected_graph.get("source_content") if isinstance(selected_graph, dict) else None
         if file_info:
+            file_info["source_content"] = source_content or ""
+            file_info["language"] = _language_from_path(file_info.get("file_path"))
             response["file"] = file_info
+        elif source_content is not None:
+            response["file"] = {
+                "file_id": file_id,
+                "file_path": selected_graph.get("file_path"),
+                "available_files": [],
+                "source_content": source_content or "",
+                "language": _language_from_path(selected_graph.get("file_path")),
+            }
         return response
     
     def _format_ast_graph(self, graph_data: Dict[str, Any]) -> Dict[str, Any]:
