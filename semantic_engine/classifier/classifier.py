@@ -406,6 +406,9 @@ class SliceClassifier:
         if rule_id in ("COMMAND_INJECTION", "CODE_INJECTION"):
             if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
                 return True
+        if rule_id == "CODE_INJECTION":
+            if re.search(r'\bre\.compile\s*\(', code):
+                return True
         if rule_id == "PATH_TRAVERSAL":
             if self._PATH_NORMPATH_SAFE.search(code) and self._PATH_STARTSWITH.search(code):
                 return True
