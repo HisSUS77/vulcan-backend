@@ -4,11 +4,14 @@ Role-aware LLM cascade pool for Vulcan.
 Three fixed roles, each with a tailored model priority list:
 
   detection  – fast, security-aware models; runs on EVERY finding (high volume)
-               Llama-4-Scout → gpt-4.1-mini → Phi-4 → mistral-small-2503 → Groq Llama-3.3 → gpt-4.1
+               Llama-4-Scout → gpt-4.1-mini → Phi-4 → mistral-small-2503 → gpt-4.1
+               → Groq Llama-3.3 → Groq Llama-4-Scout → Groq llama-3.1 → Groq gemma2-9b
 
   exploit    – best coders; runs ONLY on HIGH/CRITICAL confirmed vulns (low volume)
-               Groq Compound [CRITICAL only] → DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → Groq llama-3.3 → gpt-4.1-mini
-               Groq Compound uses web search + code execution for richer CRITICAL PoCs (has per-call cost).
+               Groq compound-beta [CRITICAL only] → DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → gpt-4.1
+               → Groq Llama-4-Scout → Groq llama-3.3 → Groq llama-3.1 → Groq gemma2-9b
+               → gpt-4.1-mini → Phi-4 → mistral-small-2503
+               Groq compound-beta uses web search + code execution for richer CRITICAL PoCs (has per-call cost).
 
   patch      – quality-first; runs once per approved patch request
                DeepSeek-V3 → gpt-4.1 → Llama-4-Maverick-FP8 → Groq llama-3.3 → o4-mini
@@ -55,21 +58,26 @@ ROLE_DEFAULTS: dict[str, list[dict]] = {
         # Groq free tier — independent quota, kicks in when GitHub is exhausted/blocked
         {"provider": "groq",   "model": "llama-3.3-70b-versatile",                     "key_env": "LLM_API_KEY"},
         {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct",   "key_env": "LLM_API_KEY"},
-        {"provider": "groq",   "model": "meta-llama/llama-4-maverick-17b-128e-instruct","key_env": "LLM_API_KEY"},
         {"provider": "groq",   "model": "llama-3.1-8b-instant",                        "key_env": "LLM_API_KEY"},
         {"provider": "groq",   "model": "gemma2-9b-it",                                "key_env": "LLM_API_KEY"},
     ],
     "exploit": [
         # Groq Compound — web search + code execution; CRITICAL findings only (paid per-call)
-        {"provider": "groq",   "model": "compound",                                  "key_env": "LLM_API_KEY", "critical_only": True},
-        # Best coders — runs on HIGH/CRITICAL vulns (free tier)
-        {"provider": "github", "model": "deepseek/DeepSeek-V3-0324",                "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "meta/Llama-4-Maverick-17B-128E-Instruct-FP8", "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "openai/o4-mini",                           "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct", "key_env": "LLM_API_KEY"},
-        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                  "key_env": "LLM_API_KEY"},
-        {"provider": "groq",   "model": "llama-3.1-8b-instant",                     "key_env": "LLM_API_KEY"},
-        {"provider": "github", "model": "openai/gpt-4.1-mini",                      "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "groq",   "model": "compound-beta",                                  "key_env": "LLM_API_KEY",        "critical_only": True},
+        # Tier 1: strongest coders (GitHub free tier)
+        {"provider": "github", "model": "deepseek/DeepSeek-V3-0324",                     "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "meta/Llama-4-Maverick-17B-128E-Instruct-FP8",   "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/o4-mini",                                "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/gpt-4.1",                                "key_env": "GITHUB_LLM_API_KEY"},
+        # Tier 2: Groq fast inference (independent quota)
+        {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct",     "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                       "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "llama-3.1-8b-instant",                          "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "gemma2-9b-it",                                  "key_env": "LLM_API_KEY"},
+        # Tier 3: GitHub last-resort fallbacks
+        {"provider": "github", "model": "openai/gpt-4.1-mini",                           "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "microsoft/Phi-4",                               "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "mistral-ai/mistral-small-2503",                 "key_env": "GITHUB_LLM_API_KEY"},
     ],
     "patch": [
         # Quality-first — correctness > speed; runs once per patch request
@@ -282,14 +290,13 @@ class RoleAwareLLMPool:
 
         return None
 
-    # Calls one provider, handles rate-limit retry, and marks provider exhausted on failure
+    # Calls one provider and marks it soft-exhausted on failure; no retry on rate limits
     async def _try_provider(
         self,
         cfg: dict,
         messages: list,
         max_tokens: int,
         temperature: float,
-        _retry: bool = False,
     ) -> Optional[str]:
         pid = cfg["id"]
         try:
@@ -322,10 +329,16 @@ class RoleAwareLLMPool:
             is_rate     = ("429" in msg or "rate limit" in msg or "too many requests" in msg or "please review our" in msg) and not is_scraping
             is_timeout  = isinstance(exc, asyncio.TimeoutError) or "timed out" in msg
 
-            if is_rate and not is_daily and not _retry:
-                logger.warning(f"[pool:{self.role}] {pid} per-minute limit — retrying in 12 s")
-                await asyncio.sleep(12)
-                return await self._try_provider(cfg, messages, max_tokens, temperature, _retry=True)
+            # Per-minute rate limit — soft-exhaust immediately so cascade falls to
+            # next model without delay. Retrying the same model just burns 12 s and
+            # hits the limit again; reset_soft_exhausted() restores it next finding.
+            if is_rate and not is_daily:
+                logger.warning(f"[pool:{self.role}] {pid} rate-limited — skipping to next model")
+                self._exhausted.add(pid)
+                self._soft_exhausted.add(pid)
+                if self._sticky and self._sticky["id"] == pid:
+                    self._sticky = None
+                return None
 
             if is_scraping:
                 # Temporary token-level block — exhaust ALL same-provider entries (soft)

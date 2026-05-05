@@ -651,10 +651,19 @@ class SemanticPipeline:
             if not eligible:
                 return formatted_vulns
 
-            # Cap at 5 findings to bound total exploit-generation time
-            eligible = eligible[:5]
-            logger.info(f"Generating PoC exploits for {len(eligible)} HIGH/CRITICAL finding(s) (sequential)...")
+            # All CRITICAL findings always get PoC; HIGH capped at 5 to bound time
+            critical_eligible = [i for i in eligible if (formatted_vulns[i].get("severity") or "").lower() == "critical"]
+            high_eligible     = [i for i in eligible if (formatted_vulns[i].get("severity") or "").lower() == "high"]
+            eligible = critical_eligible + high_eligible[:5]
+            logger.info(
+                f"Generating PoC exploits for {len(eligible)} finding(s) "
+                f"({len(critical_eligible)} CRITICAL + {min(len(high_eligible), 5)} HIGH, sequential)..."
+            )
             for i in eligible:
+                # Reset soft-exhausted providers so rate-limited models (compound,
+                # GitHub tier) get a fresh chance on each finding instead of staying
+                # blocked from the previous call.
+                exploit_svc.reset_for_next_finding()
                 fmt = formatted_vulns[i]
                 try:
                     result = await exploit_svc.generate_exploit(
