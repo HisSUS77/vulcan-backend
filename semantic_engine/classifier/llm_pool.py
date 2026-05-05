@@ -7,7 +7,9 @@ Three fixed roles, each with a tailored model priority list:
                Llama-4-Scout → gpt-4.1-mini → Phi-4 → mistral-small-2503 → Groq Llama-3.3 → gpt-4.1
 
   exploit    – best coders; runs ONLY on HIGH/CRITICAL confirmed vulns (low volume)
-               Groq Compound [CRITICAL only] → DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → Groq llama-3.3 → gpt-4.1-mini
+               Groq Compound [CRITICAL only] → DeepSeek-V3 → Llama-4-Maverick-FP8 → o4-mini → gpt-4.1
+               → Groq Llama-4-Scout → Groq llama-3.3 → Groq Llama-4-Maverick → Groq llama-3.1
+               → Groq gemma2-9b → gpt-4.1-mini → Phi-4 → mistral-small-2503
                Groq Compound uses web search + code execution for richer CRITICAL PoCs (has per-call cost).
 
   patch      – quality-first; runs once per approved patch request
@@ -61,15 +63,22 @@ ROLE_DEFAULTS: dict[str, list[dict]] = {
     ],
     "exploit": [
         # Groq Compound — web search + code execution; CRITICAL findings only (paid per-call)
-        {"provider": "groq",   "model": "compound",                                  "key_env": "LLM_API_KEY", "critical_only": True},
-        # Best coders — runs on HIGH/CRITICAL vulns (free tier)
-        {"provider": "github", "model": "deepseek/DeepSeek-V3-0324",                "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "meta/Llama-4-Maverick-17B-128E-Instruct-FP8", "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "github", "model": "openai/o4-mini",                           "key_env": "GITHUB_LLM_API_KEY"},
-        {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct", "key_env": "LLM_API_KEY"},
-        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                  "key_env": "LLM_API_KEY"},
-        {"provider": "groq",   "model": "llama-3.1-8b-instant",                     "key_env": "LLM_API_KEY"},
-        {"provider": "github", "model": "openai/gpt-4.1-mini",                      "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "groq",   "model": "compound",                                       "key_env": "LLM_API_KEY",        "critical_only": True},
+        # Tier 1: strongest coders (GitHub free tier)
+        {"provider": "github", "model": "deepseek/DeepSeek-V3-0324",                     "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "meta/Llama-4-Maverick-17B-128E-Instruct-FP8",   "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/o4-mini",                                "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "openai/gpt-4.1",                                "key_env": "GITHUB_LLM_API_KEY"},
+        # Tier 2: Groq fast inference (independent quota)
+        {"provider": "groq",   "model": "meta-llama/llama-4-scout-17b-16e-instruct",     "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "llama-3.3-70b-versatile",                       "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "meta-llama/llama-4-maverick-17b-128e-instruct", "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "llama-3.1-8b-instant",                          "key_env": "LLM_API_KEY"},
+        {"provider": "groq",   "model": "gemma2-9b-it",                                  "key_env": "LLM_API_KEY"},
+        # Tier 3: GitHub last-resort fallbacks
+        {"provider": "github", "model": "openai/gpt-4.1-mini",                           "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "microsoft/Phi-4",                               "key_env": "GITHUB_LLM_API_KEY"},
+        {"provider": "github", "model": "mistral-ai/mistral-small-2503",                 "key_env": "GITHUB_LLM_API_KEY"},
     ],
     "patch": [
         # Quality-first — correctness > speed; runs once per patch request
