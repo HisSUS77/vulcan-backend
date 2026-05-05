@@ -338,8 +338,7 @@
     ],
     "sanitizers": [
       "allowlist",
-      "urlparse",
-      "URL"
+      "urlparse"
     ],
     "confidence": "medium",
     "regex_patterns": [
