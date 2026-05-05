@@ -290,14 +290,13 @@ class RoleAwareLLMPool:
 
         return None
 
-    # Calls one provider, handles rate-limit retry, and marks provider exhausted on failure
+    # Calls one provider and marks it soft-exhausted on failure; no retry on rate limits
     async def _try_provider(
         self,
         cfg: dict,
         messages: list,
         max_tokens: int,
         temperature: float,
-        _retry: bool = False,
     ) -> Optional[str]:
         pid = cfg["id"]
         try:
@@ -330,10 +329,16 @@ class RoleAwareLLMPool:
             is_rate     = ("429" in msg or "rate limit" in msg or "too many requests" in msg or "please review our" in msg) and not is_scraping
             is_timeout  = isinstance(exc, asyncio.TimeoutError) or "timed out" in msg
 
-            if is_rate and not is_daily and not _retry:
-                logger.warning(f"[pool:{self.role}] {pid} per-minute limit — retrying in 12 s")
-                await asyncio.sleep(12)
-                return await self._try_provider(cfg, messages, max_tokens, temperature, _retry=True)
+            # Per-minute rate limit — soft-exhaust immediately so cascade falls to
+            # next model without delay. Retrying the same model just burns 12 s and
+            # hits the limit again; reset_soft_exhausted() restores it next finding.
+            if is_rate and not is_daily:
+                logger.warning(f"[pool:{self.role}] {pid} rate-limited — skipping to next model")
+                self._exhausted.add(pid)
+                self._soft_exhausted.add(pid)
+                if self._sticky and self._sticky["id"] == pid:
+                    self._sticky = None
+                return None
 
             if is_scraping:
                 # Temporary token-level block — exhaust ALL same-provider entries (soft)
