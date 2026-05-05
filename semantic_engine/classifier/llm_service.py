@@ -44,9 +44,14 @@ def _extract_json_payload(text: str) -> str:
     """Extract the most likely JSON object from LLM output."""
     stripped = text.strip()
 
-    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", stripped, re.DOTALL | re.IGNORECASE)
-    if fence_match:
-        stripped = fence_match.group(1).strip()
+    # Strip opening code fence without requiring a matching closing fence.
+    # Requiring a closing ``` causes non-greedy regex to mis-match when the
+    # response is truncated or contains backtick snippets inside field values.
+    fence_open = re.match(r"```(?:json)?\s*", stripped, re.IGNORECASE)
+    if fence_open:
+        stripped = stripped[fence_open.end():].strip()
+        # Remove trailing closing fence if present
+        stripped = re.sub(r"\s*```\s*$", "", stripped).strip()
 
     start = stripped.find("{")
     end = stripped.rfind("}")
