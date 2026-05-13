@@ -161,6 +161,7 @@ class InterproceduralDFG:
             NodeType.EXTERNAL_CALL,
             NodeType.SYSTEM_CALL,
             NodeType.EVAL_CALL,
+            NodeType.ORM_QUERY,
         }
         self.param_types = {NodeType.PARAMETER}
         self.assignment_types = {NodeType.ASSIGNMENT, NodeType.VARIABLE}
@@ -1080,7 +1081,9 @@ class InterproceduralDFG:
         all_edges = list(self.cpg.edges) + self.dfg_edges
         return SemanticGraph(
             nodes=self.cpg.nodes,
-            edges=all_edges
+            edges=all_edges,
+            symbol_table=self.cpg.symbol_table,
+            scopes=self.cpg.scopes,
         )
     
     def extract_interprocedural_paths(

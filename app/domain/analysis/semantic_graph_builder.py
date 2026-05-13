@@ -13,6 +13,7 @@ Architecture:
 from app.schemas.graph import SemanticGraph, GraphNode, GraphEdge
 from app.domain.analysis.cpg_parser import CPGParser
 from app.domain.analysis.interprocedural_dfg import InterproceduralDFG
+from app.domain.analysis.semantic_enricher import SemanticGraphEnricher
 from app.domain.analysis.taint_engine import TaintEngine
 from app.enums.node_type import NodeType
 from app.enums.edge_type import EdgeType
@@ -67,8 +68,12 @@ class SemanticGraphBuilder:
         trace_step("DFG: InterproceduralDFG.build()")
         dfg_builder = InterproceduralDFG(cpg)
         enhanced_cpg = dfg_builder.build()
+
+        # Step 3: Append higher-level CPG relationships while preserving schema.
+        trace_step("CPG: SemanticGraphEnricher.enrich()")
+        enhanced_cpg = SemanticGraphEnricher(enhanced_cpg).enrich()
         
-        # Step 3: Return enhanced CPG directly (already SemanticGraph-compatible)
+        # Step 4: Return enhanced CPG directly (already SemanticGraph-compatible)
         return enhanced_cpg
     
     def _cpg_to_semantic_graph(self, cpg) -> SemanticGraph:
