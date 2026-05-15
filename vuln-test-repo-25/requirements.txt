@@ -1,2 +1,0 @@
-﻿-e git+https://github.com/example/insecure#egg=insecurepkg
-requests==*

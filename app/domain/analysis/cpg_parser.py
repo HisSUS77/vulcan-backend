@@ -283,6 +283,7 @@ class CPGParser:
         self.current_scope_id = None
         self.symbol_references = []
         self.symbol_table = {}
+        self.call_nodes = []
         self._source_bytes = source_code.encode("utf-8", errors="ignore")
         
         try:
@@ -492,6 +493,43 @@ class CPGParser:
                 self._exit_scope()
                 return
         
+        # CONTROL FLOW
+        elif node_type in ("if_statement", "if_statement_clause", "elif_clause", "else_clause"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.IF_STATEMENT, "if")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("for_statement", "for_in_statement"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.FOR_STATEMENT, "for")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type == "while_statement":
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.WHILE_STATEMENT, "while")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("try_statement", "try"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.TRY_STATEMENT, "try")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("except_clause", "except_handler", "catch_clause"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.EXCEPT_HANDLER, "except")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("raise_statement", "throw_statement"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.RAISE, "raise")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type == "return_statement":
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.RETURN, "return")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+
         # IMPORTS
         elif node_type in ("import_statement", "import_declaration", "import_specifier", "import_from_statement"):
             graph_node = self._extract_import(ts_node, node_id, source_code, filename, language)
@@ -513,6 +551,28 @@ class CPGParser:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
                 self.call_nodes.append(graph_node)
+
+        # STRINGS / TEMPLATES
+        elif node_type in ("string", "string_literal"):
+            graph_node = self._extract_literal_or_string(ts_node, node_id, source_code, filename, language)
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("template_string", "template_substitution"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.TEMPLATE_LITERAL, "template")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("interpolation", "formatted_string", "f_string"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.FSTRING, "fstring")
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("binary_expression", "binary_operator"):
+            graph_node = self._extract_string_or_binary(ts_node, node_id, source_code, filename, language)
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
         
         # MEMBER EXPRESSIONS (obj.prop.method)
         elif node_type in ("member_expression", "attribute"):
@@ -536,6 +596,11 @@ class CPGParser:
         # IDENTIFIERS (symbol references)
         elif node_type == "identifier":
             graph_node = self._extract_identifier(ts_node, node_id, source_code, filename, language)
+            if graph_node:
+                nodes.append(graph_node)
+                edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
+        elif node_type in ("integer", "float", "true", "false", "none", "null", "number"):
+            graph_node = self._extract_generic_node(ts_node, node_id, source_code, filename, language, NodeType.LITERAL, "literal")
             if graph_node:
                 nodes.append(graph_node)
                 edges.append(GraphEdge(from_node=parent_id, to_node=node_id, type=EdgeType.AST_CHILD))
@@ -611,6 +676,57 @@ class CPGParser:
             source_code=self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)[:200],
             metadata=metadata
         )
+
+    def _extract_generic_node(
+        self,
+        ts_node: TSNode,
+        node_id: str,
+        source_code: str,
+        filename: str,
+        language: LanguageType,
+        node_type: NodeType,
+        default_name: str
+    ) -> Optional[GraphNode]:
+        """Extract a typed generic node while preserving source text."""
+        text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
+        metadata = NodeMetadata(
+            language=language.value,
+            scope_id=self.current_scope_id
+        )
+        return GraphNode(
+            id=node_id,
+            type=node_type,
+            name=default_name,
+            value=text[:200] if node_type in {NodeType.LITERAL, NodeType.SQL_QUERY} else None,
+            file=filename,
+            line=ts_node.start_point[0] + 1,
+            column=ts_node.start_point[1],
+            source_code=text[:500],
+            metadata=metadata
+        )
+
+    def _extract_literal_or_string(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
+        """Extract string literals, upgrading f-strings and SQL-looking strings."""
+        text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
+        stripped = text.lstrip()
+        lowered = text.lower()
+        if stripped.startswith(("f'", 'f"', "F'", 'F"')):
+            node_type = NodeType.FSTRING
+            name = "fstring"
+        elif any(word in lowered for word in ("select ", "insert ", "update ", "delete ", "drop ", " where ")):
+            node_type = NodeType.SQL_QUERY
+            name = "sql"
+        else:
+            node_type = NodeType.LITERAL
+            name = "string"
+        return self._extract_generic_node(ts_node, node_id, source_code, filename, language, node_type, name)
+
+    def _extract_string_or_binary(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
+        """Extract binary expressions, tagging string concatenation when likely."""
+        text = self._slice_source(ts_node.start_byte, ts_node.end_byte, source_code)
+        node_type = NodeType.STRING_CONCAT if "+" in text and any(q in text for q in ("'", '"', "`")) else NodeType.BINARY_OP
+        name = "string_concat" if node_type == NodeType.STRING_CONCAT else "binary"
+        return self._extract_generic_node(ts_node, node_id, source_code, filename, language, node_type, name)
     
     def _extract_class(self, ts_node: TSNode, node_id: str, source_code: str, filename: str, language: LanguageType) -> Optional[GraphNode]:
         """Extract class declaration"""
@@ -736,9 +852,20 @@ class CPGParser:
             scope_id=self.current_scope_id
         )
         
+        call_type = NodeType.CALL_EXPRESSION
+        lowered = call_text.lower()
+        if any(token in lowered for token in ["eval(", "exec(", "function("]):
+            call_type = NodeType.EVAL_CALL
+        elif any(token in lowered for token in ["system(", "popen(", "subprocess.", "child_process"]):
+            call_type = NodeType.SYSTEM_CALL
+        elif any(token in lowered for token in ["fetch(", "axios.", "requests.", "http.", "https."]):
+            call_type = NodeType.EXTERNAL_CALL
+        elif any(token in lowered for token in ["execute(", ".query(", ".raw(", ".filter(", ".find(", ".aggregate("]):
+            call_type = NodeType.ORM_QUERY
+
         return GraphNode(
             id=node_id,
-            type=NodeType.CALL_EXPRESSION,
+            type=call_type,
             name=func_name or "call",
             value=call_text[:100],
             file=filename,
@@ -757,7 +884,7 @@ class CPGParser:
         )
         node_type = NodeType.ROUTE_DECORATOR if "route" in decorator_text or "router." in decorator_text else NodeType.EXPRESSION
         if any(tok in decorator_text for tok in ["login_required", "permission_required", "authorize", "is_authenticated"]):
-            metadata.security_role = "auth_guard"
+            metadata.security_role = "sink"
             node_type = NodeType.AUTH_GUARD
         return GraphNode(
             id=node_id,

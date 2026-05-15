@@ -26,3 +26,31 @@ tests/.tmp_work/
 cpg_*.json
 
 graphify-out/*
+
+# Runtime upload folder
+repo_uploads/
+
+# Compiled tree-sitter binaries
+build/
+
+# Scratch / debug scripts (root level)
+UPGRADE_SUCCESS_REPORT.py
+check_api_keys.py
+demo_universal_parser.py
+verify_installation.py
+test_cpg_debug.py
+test_llm_providers.py
+enhanced.md
+verify.md
+Vulcan.pptm
+
+# Zip archives
+*.zip
+
+# Ad-hoc test/example directories
+test_files/
+test-apis/
+examples/
+docs/
+Document-MarkDowns/
+vuln-test-repo-25/

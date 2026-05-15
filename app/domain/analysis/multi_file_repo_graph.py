@@ -40,6 +40,7 @@ from app.core.trace import trace_step
 from app.domain.analysis.html_parser import HTMLParser
 from app.domain.analysis.html_backend_linker import HTMLBackendLinker
 from app.domain.analysis.interprocedural_dfg import InterproceduralDFG, DFGEdgeType
+from app.domain.analysis.semantic_enricher import SemanticGraphEnricher
 from pydantic import BaseModel
 
 
@@ -1502,6 +1503,11 @@ class MultiFileRepositoryGraph:
         # Step 5c: Link route decorators to handlers and auth guards
         self._link_routes_and_guards(global_cpg)
 
+        # Step 5d: Append CPG-style semantic edge families not owned by
+        # import/export linking. This keeps the existing schema stable.
+        global_cpg = SemanticGraphEnricher(global_cpg).enrich()
+        self.all_edges = global_cpg.edges
+
         # Step 6: Parse HTML/templates and link to backend graph
         if html_files:
             print(f"\n[INFO] Parsing HTML/templates...")
@@ -1530,6 +1536,8 @@ class MultiFileRepositoryGraph:
 
             # Refresh global graph with HTML nodes/edges
             global_cpg = SemanticGraph(nodes=self.all_nodes, edges=self.all_edges)
+            global_cpg = SemanticGraphEnricher(global_cpg).enrich()
+            self.all_edges = global_cpg.edges
         
         stats = self._compute_statistics()
         
@@ -1707,7 +1715,7 @@ class MultiFileRepositoryGraph:
 
         existing = {(e.from_node, e.to_node, e.type) for e in graph.edges}
         for node in graph.nodes:
-            if node.type != NodeType.CALL_EXPRESSION:
+            if node.type not in {NodeType.CALL_EXPRESSION, NodeType.EXTERNAL_CALL, NodeType.SYSTEM_CALL, NodeType.EVAL_CALL, NodeType.ORM_QUERY}:
                 continue
             callee = node.name or ""
             if not callee:
@@ -1771,7 +1779,7 @@ class MultiFileRepositoryGraph:
             if edge.type != EdgeType.AST_CHILD:
                 continue
             parent = node_map.get(edge.from_node)
-            if not parent or parent.type != NodeType.CALL_EXPRESSION:
+            if not parent or parent.type not in {NodeType.CALL_EXPRESSION, NodeType.EXTERNAL_CALL, NodeType.SYSTEM_CALL, NodeType.EVAL_CALL, NodeType.ORM_QUERY}:
                 continue
             child = node_map.get(edge.to_node)
             if child and child.type in _CALLEE_TYPES:
@@ -1783,7 +1791,7 @@ class MultiFileRepositoryGraph:
             if edge.type != EdgeType.AST_CHILD:
                 continue
             parent = node_map.get(edge.from_node)
-            if not parent or parent.type != NodeType.CALL_EXPRESSION:
+            if not parent or parent.type not in {NodeType.CALL_EXPRESSION, NodeType.EXTERNAL_CALL, NodeType.SYSTEM_CALL, NodeType.EVAL_CALL, NodeType.ORM_QUERY}:
                 continue
             child = node_map.get(edge.to_node)
             if not child:
