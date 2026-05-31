@@ -9,6 +9,14 @@ class BenchmarkRunRequest(APIModel):
     enable_llm: bool = False
 
 
+class CodeQLBenchmarkRunRequest(APIModel):
+    enable_llm: bool = False
+    roots: Optional[List[str]] = None
+    line_tolerance: int = 2
+    limit: Optional[int] = None
+    supported_only: bool = True
+
+
 class TestCase(APIModel):
     id: Optional[str] = None
     name: str

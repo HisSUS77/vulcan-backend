@@ -6,7 +6,8 @@ from app.api.deps import get_current_user, get_mongo_db
 from app.services.benchmark_service import BenchmarkService
 from app.services.confirmation_service import ConfirmationService
 from app.schemas.benchmark import (
-    TestCase, TestCaseCreate, BenchmarkRun, LeaderboardEntry, BenchmarkRunRequest
+    TestCase, TestCaseCreate, BenchmarkRun, LeaderboardEntry, BenchmarkRunRequest,
+    CodeQLBenchmarkRunRequest
 )
 from app.schemas.confirmation import ConfirmedFinding, FieldMetrics, SpotCheckVerdict
 from app.db.seed_benchmark import SEED_CASES
@@ -70,6 +71,22 @@ async def run_benchmark(
     """Run all test cases through the scanner and save results."""
     await svc.seed_if_empty(SEED_CASES)
     return await svc.run_benchmark(enable_llm=body.enable_llm)
+
+
+@router.post("/run-codeql-corpus", response_model=BenchmarkRun)
+async def run_codeql_corpus_benchmark(
+    body: CodeQLBenchmarkRunRequest = CodeQLBenchmarkRunRequest(),
+    svc: BenchmarkService           = Depends(_svc),
+    _user=Depends(get_current_user),
+):
+    """Run the independently auditable CodeQL fixture corpus benchmark."""
+    return await svc.run_codeql_corpus_benchmark(
+        enable_llm=body.enable_llm,
+        roots=body.roots,
+        line_tolerance=body.line_tolerance,
+        limit=body.limit,
+        supported_only=body.supported_only,
+    )
 
 
 @router.get("/runs", response_model=List[BenchmarkRun])
