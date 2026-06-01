@@ -84,7 +84,12 @@
       "\\.(?:find|findOne|findMany|aggregate|where|mapReduce|update|remove|deleteOne|deleteMany)\\s*\\([^\\n]*(?:req\\.|request\\.|\\$where|query|filter|criteria|data)",
       "\\.raw\\s*\\(\\s*(?:f['\"]|[a-zA-Z_]\\w*\\s*(?:\\+|%|\\.))",
       "text\\s*\\(\\s*(?:f['\"]|[^'\"\\s\\)][^)]*(?:\\+|\\{))",
-      "(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\.format\\s*\\([^)]*[a-zA-Z_]"
+      "(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\.format\\s*\\([^)]*[a-zA-Z_]",
+      "text\\s*\\(\\s*(?:f['\"]|[a-zA-Z_]\\w*\\s*[+%]|['\"][^'\"]*(?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*['\"]\\s*[+%])",
+      "(?:extra|annotate)\\s*\\(\\s*(?:where\\s*=\\s*\\[|select\\s*=\\s*\\{)[^\\]\\}]*(?:request\\.|req\\.|%s|\\{\\}|format)",
+      "(?:db|conn|connection|pool|client|session)\\.(?:execute|query|run)\\s*\\([^\\n]*(?:f['\"].*(?:SELECT|INSERT|UPDATE|DELETE)|`[^`]*\\$\\{[^}]*(?:SELECT|INSERT|UPDATE|DELETE)|\\+\\s*[a-zA-Z_])",
+      "(?:cursor|cur|conn|db)\\.execute\\s*\\([^)\\n]*[+%](?![^)]*(?:%s|\\?|\\$\\d|:))",
+      "(?:filter|where|having)\\s*\\([^)\\n]*(?:request\\.|req\\.)[^)]*(?![^)]*(?:params\\s*=|bindparams|values\\s*=))"
     ]
   },
   "COMMAND_INJECTION": {
@@ -105,22 +110,28 @@
       "request.args",
       "request.form",
       "request.json",
+      "request.values",
+      "request.data",
       "req.query",
       "req.body",
       "req.params",
+      "req.headers",
       "input",
       "sys.argv",
-      "process.argv"
-      ,"url.parse"
-      ,"location.search"
+      "process.argv",
+      "url.parse",
+      "location.search"
     ],
     "sinks": [
       "os.system",
+      "os.popen",
       "subprocess.call",
       "subprocess.check_call",
+      "subprocess.check_output",
       "subprocess.Popen",
       "subprocess.run",
-      "os.popen",
+      "commands.getoutput",
+      "commands.getstatusoutput",
       "child_process.exec",
       "child_process.spawn",
       "child_process.execSync",
@@ -161,7 +172,18 @@
       "(?:cp\\.)?(?:spawn|execFile)\\s*\\([^\\n]*\\[(?:[^\\]]*,)*\\s*(?:cmd|command|path)\\s*(?:,|\\])",
       "url\\.parse\\s*\\([^)]*req\\.url[^)]*\\)\\.query\\.[a-zA-Z_]\\w*[\\s\\S]{0,400}(?:cp\\.)?(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\\s*\\(",
       "spawn\\s*\\([^)]*(?:\\+[^)]*[a-zA-Z_]|(?<!['\\\"])\\b[a-zA-Z_]\\w*\\s*,)[^)]*shell\\s*:\\s*true",
-      "execSync\\s*\\(\\s*(?!['\\\"`])(?!timeout\\b)(?!options\\b)[a-zA-Z_]\\w*\\s*[).]"
+      "execSync\\s*\\(\\s*(?!['\\\"`])(?!timeout\\b)(?!options\\b)[a-zA-Z_]\\w*\\s*[).]",
+      "subprocess\\.(?:run|Popen|call|check_call|check_output)\\s*\\(\\s*\\[[^\\]]*[a-zA-Z_][a-zA-Z0-9_.]*\\s*(?:[+,\\]])",
+      "os\\.system\\s*\\(\\s*[a-zA-Z_][^)\\n]*(?:[+%]|format\\s*\\(|\\.join\\s*\\(|f['\"]|\\bcommand\\b|\\bcmd\\b|\\barg)",
+      "os\\.popen\\s*\\(\\s*[a-zA-Z_][^)\\n]*(?:[+%]|format\\s*\\(|\\.join\\s*\\(|f['\"]|\\bcommand\\b|\\bcmd\\b)",
+      "subprocess\\.check_output\\s*\\([^)\\n]*(?:shell\\s*=\\s*True|[a-zA-Z_]\\w*\\s*[+]|f['\"])",
+      "commands\\.(?:getoutput|getstatusoutput)\\s*\\(",
+      "child_process\\.(?:exec|spawn|execFile|fork)\\s*\\([^\\n]*(?:req\\.|request\\.|\\burl\\b|\\bcmd\\b|\\bcommand\\b|\\barg\\b|\\bfilename\\b)",
+      "(?<![.\\w])exec\\s*\\(\\s*`[^`]*\\$\\{",
+      "(?<![.\\w])execSync\\s*\\(\\s*`[^`]*\\$\\{",
+      "(?<![.\\w])exec(?:Sync)?\\s*\\([^)\\n]*(?:['\"`][^'\"\\n]*['\"`]\\s*\\+|\\+\\s*[a-zA-Z_]\\w*)",
+      "(?<![.\\w])spawn\\s*\\(\\s*(?!['\"`])[a-zA-Z_]\\w*\\s*[,)]",
+      "\\.exec\\s*\\(\\s*`[^`]*\\$\\{"
     ]
   },
   "CODE_INJECTION": {
@@ -261,7 +283,13 @@
       "dangerouslySetInnerHTML",
       "make_response",
       "res.send",
-      "send"
+      "res.write",
+      "res.end",
+      "send",
+      "insertAdjacentHTML",
+      "bypassSecurityTrustHtml",
+      "bypassSecurityTrustScript",
+      "bypassSecurityTrustUrl"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -289,7 +317,14 @@
       "res\\.send\\s*\\([^\\n]*(?:req\\.|request\\.|params\\.|body\\b|marked\\(|snarkdown|render\\(|processSync|invalidKeys)",
       "return\\s+(?:request\\.|req\\.|request\\.query|req\\.query)",
       "render_template_string\\s*\\(\\s*(?:[^'\"\\s\\)])",
-      "Markup\\s*\\([^)]*(?:f['\"]|request\\.|req\\.|\\+)"
+      "Markup\\s*\\([^)]*(?:f['\"]|request\\.|req\\.|\\+)",
+      "res\\.write\\s*\\([^\\n]*(?:req\\.|request\\.|\\+\\s*[a-zA-Z_]|\\$\\{[^}]*(?:req|request|query|param|body))",
+      "insertAdjacentHTML\\s*\\([^)]*(?:req\\.|request\\.|location\\.|[a-zA-Z_]\\w*)",
+      "`[^`]*\\$\\{[^}]*(?:req\\.|request\\.|location\\.|query|param|body|search|hash)[^`]*`(?=[^;\\n]*(?:innerHTML|outerHTML|write|insertAdjacentHTML|html\\s*\\())",
+      "(?:el|element|node|target|div|span|container|wrapper)\\s*(?:\\[\\s*['\"]innerHTML['\"]\\s*\\]|\\.innerHTML)\\s*=",
+      "\\.setAttribute\\s*\\(\\s*['\"](?:href|src|action|formaction|data-[^'\"]+)['\"]\\s*,\\s*(?:req\\.|request\\.|[a-zA-Z_]\\w*(?:Url|URL|Link|Href|Src))",
+      "return\\s+(?:jsonify|make_response)\\s*\\([^)\\n]*(?:f['\"]|\\+\\s*(?:request\\.|req\\.)|request\\.(?:args|form|json|data|values))",
+      "\\.html\\s*\\(\\s*[a-zA-Z_]\\w*\\s*\\)(?=[^\\n]*(?:innerHTML|document\\.write|\\$\\s*\\())"
     ]
   },
   "PATH_TRAVERSAL": {
@@ -309,23 +344,42 @@
       "request.POST",
       "request.args",
       "request.form",
+      "request.values",
+      "request.json",
+      "request.data",
+      "request.files",
       "req.query",
       "req.body",
-      "req.params"
+      "req.params",
+      "req.headers",
+      "req.url"
     ],
     "sinks": [
       "open",
+      "os.open",
+      "io.open",
+      "aiofiles.open",
       "os.path.join",
       "pathlib.Path",
       "shutil.copy",
       "shutil.move",
+      "os.makedirs",
+      "os.mkdir",
+      "os.remove",
+      "os.unlink",
+      "os.rename",
       "fs.readFile",
       "fs.writeFile",
       "fs.readFileSync",
       "fs.writeFileSync",
+      "fs.appendFile",
+      "fs.appendFileSync",
+      "fs.createReadStream",
+      "fs.createWriteStream",
       "path.join",
       "send_file",
-      "res.sendFile"
+      "res.sendFile",
+      "send_from_directory"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -355,7 +409,18 @@
       "(?:res\\.)?sendFile\\s*\\([^)]*(?:\\+|req\\.(?:query|params|body))",
       "(?:fs\\.)?readFileSync?\\s*\\([^)]*(?:\\+[^)]*|req\\.(?:query|params|body))",
       "pathlib\\.Path\\s*\\([^)]*\\)\\s*/\\s*[a-zA-Z_]",
-      "open\\s*\\([^)]*\\+[^)]*(?:request\\.|req\\.|filename|file\\b|fname|path)"
+      "open\\s*\\([^)]*\\+[^)]*(?:request\\.|req\\.|filename|file\\b|fname|path)",
+      "open\\s*\\(\\s*(?:request\\.(?:args|form|values|json|data|get_json)(?:\\.get)?\\s*\\(|req\\.(?:query|params|body)\\b)",
+      "(?:os\\.open|io\\.open|aiofiles\\.open)\\s*\\([^)\\n]*(?:request\\.|req\\.)",
+      "(?:os\\.makedirs|os\\.mkdir|os\\.remove|os\\.unlink|os\\.rename|shutil\\.(?:copy|move|rmtree))\\s*\\([^)\\n]*(?:request\\.|req\\.)",
+      "pathlib\\.Path\\s*\\([^)\\n]*(?:request\\.|req\\.|args\\[|form\\[|query\\[|params\\[)",
+      "fs\\.(?:readFile|writeFile|appendFile|createReadStream|createWriteStream|stat|unlink|access|mkdir|rmdir|rename|copyFile)(?:Sync)?\\s*\\([^\\n]*req\\.(?:query|params|body|headers|url)",
+      "(?:send_file|send_from_directory)\\s*\\([^)\\n]*(?:request\\.(?:args|form|values|json|get_json)|req\\.(?:query|params|body))",
+      "(?:open|read_file|write_file)\\s*\\(\\s*(?:os\\.path\\.join\\s*\\([^)]*(?:request\\.|req\\.)|pathlib\\.Path\\s*\\([^)]*(?:request\\.|req\\.))",
+      "open\\s*\\(\\s*os\\.path\\.join\\s*\\(",
+      "fs\\.(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream|appendFile)(?:Sync)?\\s*\\(\\s*[a-zA-Z_]\\w*\\s*[,)]",
+      "(?:const|let|var)\\s+[a-zA-Z_]\\w*\\s*=\\s*req\\.(?:query|params|body|headers)\\.[a-zA-Z_]\\w*",
+      "[a-zA-Z_]\\w*\\s*=\\s*request\\.(?:args|form|values|json|data)(?:\\.get)?\\s*\\("
     ]
   },
   "SSRF": {
@@ -384,10 +449,16 @@
       "callback_url",
       "avatar_url",
       "target",
+      "webhook",
+      "endpoint",
+      "redirect_url",
       "unsafe_host",
       "unsafe_path",
       "full_url",
-      "request.url"
+      "request.url",
+      "request.values",
+      "request.data",
+      "req.headers"
     ],
     "sinks": [
       "requests.get",
@@ -436,7 +507,12 @@
       "urllib\\.request\\.urlopen\\s*\\([a-zA-Z_]",
       "httpx\\.(get|post)\\s*\\([a-zA-Z_][^)]*url[^)]*\\)",
       "axios\\.(get|post)\\s*\\([^)]*(?:req\\.|request\\.|\\burl\\b|webhook|callback)(?![^)]*(?:URL|urlparse|allowlist|allowedDomains|ALLOWED))",
-      "httpx\\.AsyncClient[\\s\\S]{0,500}client\\.(get|post|put|delete|request)\\s*\\(\\s*[a-zA-Z_]"
+      "httpx\\.AsyncClient[\\s\\S]{0,500}client\\.(get|post|put|delete|request)\\s*\\(\\s*[a-zA-Z_]",
+      "(?:aiohttp\\.ClientSession|httpx\\.AsyncClient)[\\s\\S]{0,400}(?:get|post|put|delete|request)\\s*\\(\\s*(?:callback|webhook|url|target|endpoint|[a-zA-Z_]\\w*[Uu]rl)\\b",
+      "urllib\\.parse\\.urljoin\\s*\\([^)]*(?:request\\.|req\\.)[^)]*\\)[^\\n]{0,300}(?:requests?\\.|urlopen|httpx\\.(?:get|post|AsyncClient)|fetch|got)",
+      "(?:got|node-fetch|superagent|needle|axios)\\.(?:get|post|put|delete|request)?\\s*\\(?[^)\\n]*(?:req\\.|request\\.|callback|webhook|\\burl\\b|endpoint)(?![^)]*(?:allowlist|ALLOWED|validateUrl|is_safe_url))",
+      "new\\s+URL\\s*\\([^)\\n]*(?:req\\.|request\\.|\\burl\\b|callback)[^)]*\\)[^\\n]{0,300}(?:fetch|axios|got|request\\.get|urlopen)",
+      "requests\\.(get|post|put|delete|request)\\s*\\(\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*[,)](?![^\\n]*(?:allowlist|ALLOWED|is_safe_url|urlparse\\.scheme))"
     ]
   },
   "BROKEN_ACCESS_CONTROL": {

@@ -350,11 +350,20 @@ class BenchmarkService:
             union_expected_by_fixture[key].extend(case.expected_findings)
             cases_by_fixture[str(case.fixture_dir.resolve())].append(case)
 
+        # 3 minutes per fixture is generous; large JS repos (40+ files) occasionally
+        # complete in 60-90 s after the BFS operation cap. Adjust via env if needed.
+        import asyncio as _asyncio
+        import os as _os
+        _FIXTURE_TIMEOUT = float(_os.getenv("BENCHMARK_FIXTURE_TIMEOUT", "180"))
+
         for fixture_key, fixture_cases in cases_by_fixture.items():
             fixture_dir = fixture_cases[0].fixture_dir
             observed_by_cwe: dict[str, list[dict]] = defaultdict(list)
             try:
-                result = await pipeline.analyze_repository(str(fixture_dir))
+                result = await _asyncio.wait_for(
+                    pipeline.analyze_repository(str(fixture_dir)),
+                    timeout=_FIXTURE_TIMEOUT,
+                )
                 if result.success:
                     slim_findings = [
                         _slim_benchmark_finding(v)
@@ -369,10 +378,16 @@ class BenchmarkService:
                         fixture_dir,
                         "; ".join(result.errors or []),
                     )
+            except _asyncio.TimeoutError:
+                logger.warning(
+                    "CodeQL corpus fixture timed out after %.0fs: %s — counting expected findings as FN",
+                    _FIXTURE_TIMEOUT, fixture_dir,
+                )
+                result = None
             except Exception as e:
                 logger.warning(f"CodeQL corpus scan failed for {fixture_dir}: {e}")
-            finally:
                 result = None
+            finally:
                 gc.collect()
 
             for case in fixture_cases:

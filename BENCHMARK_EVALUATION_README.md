@@ -1,10 +1,8 @@
-# VULCAN Benchmark Evaluation Draft
+# VULCAN Benchmark Evaluation
 
-This document is a partially filled evaluation template for VULCAN. It includes the benchmark results currently available from the CodeQL corpus evaluation and leaves explicit placeholders for baseline tools, statistical testing, patch validation, memory profiling, and third-party audit evidence.
+This document tracks benchmark results for VULCAN against the CodeQL security fixture corpus, including per-CWE root-cause analysis, engine improvement history, and targets for each release iteration.
 
-## 1. Current Benchmark Summary
-
-Current evaluated system:
+## 1. Benchmark Configuration
 
 ```text
 Tool: VULCAN
@@ -19,43 +17,70 @@ Result persistence: MongoDB benchmark_runs collection
 Benchmark job persistence: MongoDB benchmark_jobs collection
 ```
 
-Latest measured six-family result:
+## 2. Benchmark History
+
+### Baseline — Initial release
 
 ```text
-Total scored outcomes: 3,649
-TP: 634
-FP: 50
-FN: 2,964
-TN: 1
-Precision: 92.69%
-Recall: 17.62%
-F1: 29.61%
-```
-
-Previous dashboard baseline before recall improvements:
-
-```text
-TP: 469
-FP: 38
-FN: 3,350
-Total cases: 3,857
-Precision: 92.5%
-Recall: 12.3%
-F1: 21.7%
+TP: 469 | FP: 38 | FN: 3,350 | Total: 3,857
+Precision: 92.5% | Recall: 12.3% | F1: 21.7%
 Runtime: 149.3 seconds
 ```
 
-Observed improvement:
+### v2 — Sink registry expansion (XSS + SQLi)
+
+Added `bypassSecurityTrustHtml`, specialized ORM query wrappers, CWE-94 regex depth.
 
 ```text
-Recall improved from 12.3% to 17.62%
-F1 improved from 21.7% to 29.61%
-Precision remained above the 90% target
+TP: 634 | FP: 50 | FN: 2,964 | TN: 1
+Precision: 92.69% | Recall: 17.62% | F1: 29.61%
 ```
 
-## 2. Benchmark Results
+Per-CWE breakdown:
 
-### 2.1 VULCAN Per-CWE Results
+| CWE | TP | FP | FN | Precision | Recall | F1 | Root Cause of Low Recall |
+|---|---:|---:|---:|---:|---:|---:|---|
+| CWE-22 Path Traversal | 46 | 3 | 594 | 93.88% | 7.19% | 13.35% | Safe-pattern over-suppression; narrow regex coverage |
+| CWE-78 Cmd Injection | 60 | 4 | 654 | 93.75% | 8.40% | 15.42% | `subprocess([...])` incorrectly marked safe; limited shell patterns |
+| CWE-79 XSS | 307 | 34 | 1,023 | 90.03% | 23.08% | 36.74% | Missing res.write / insertAdjacentHTML / template-literal sinks |
+| CWE-89 SQLi | 94 | 5 | 355 | 94.95% | 20.94% | 34.31% | Missing SQLAlchemy text(), Django extra(), indirect string building |
+| CWE-918 SSRF | 29 | 0 | 165 | 100.00% | 14.95% | 26.01% | Missing async-client patterns, node-fetch/got, urljoin chains |
+| CWE-94 Code Injection | 98 | 4 | 173 | 96.08% | 36.16% | 52.55% | Best performer; re.compile suppressor correctly scoped |
+| **Overall** | **634** | **50** | **2,964** | **92.69%** | **17.62%** | **29.61%** | |
+
+### v3 — Recall engineering (current iteration)
+
+**Root-cause fixes applied:**
+
+1. **`_SUBPROCESS_LIST` safe pattern** (classifier.py) — Previously matched ANY `subprocess.run([...])` call and marked it safe. This incorrectly suppressed `subprocess.run(['sh', '-c', user_input])` and similar argument-injection patterns. Fixed: now only matches when the list contains **exclusively string literals**. Variable elements leave the pattern unmatched → correctly flagged.
+
+2. **`_PATH_NORMPATH_SAFE + _PATH_STARTSWITH` safe pattern** (classifier.py) — Previously fired when `os.path.normpath` appeared anywhere AND `startswith` appeared anywhere in the same snippet — even in unrelated code. `normpath` alone does NOT prevent path traversal (no symlink resolution). Fixed: replaced with `_PATH_REALPATH_PREFIX` which requires `realpath`/`abspath` (strong canonicalization) and a `startswith` prefix check to appear **in close proximity**, which is the only pattern that actually prevents traversal.
+
+3. **CWE-22 regex + sinks** (queries.json) — Added 8 new regex patterns covering: `open(request.args...)` direct calls, `os.open`/`io.open`/`aiofiles.open`, `os.makedirs`/`os.remove` family, `pathlib.Path(request...)`, JS `fs.*` with `req.query/params/body`, `send_file`/`send_from_directory` with request access. Added 13 new sinks including `os.open`, `io.open`, `aiofiles.open`, `os.makedirs`, `fs.createReadStream`, `fs.appendFile`, `send_from_directory`.
+
+4. **CWE-78 regex + sources + sinks** (queries.json) — Added 6 new regex patterns: subprocess list with variable args, `os.system(variable)` with string operations, `os.popen(variable)`, `subprocess.check_output` with shell/concatenation, `commands.getoutput/getstatusoutput`, JS `child_process.*` with req variables. Added `commands.getoutput`, `commands.getstatusoutput`, `subprocess.check_output` sinks. Added `request.values`, `request.data`, `req.headers` sources.
+
+5. **CWE-79 regex + sinks** (queries.json) — Added 7 new regex patterns: `res.write` with user input, `insertAdjacentHTML`, template-literal injection chained to dangerous sinks, `element.innerHTML =`, `.setAttribute(href/src/action, ...)`, direct Flask `make_response` with user data. Added `res.write`, `res.end`, `insertAdjacentHTML`, `bypassSecurityTrustScript`, `bypassSecurityTrustUrl` sinks.
+
+6. **CWE-89 regex** (queries.json) — Added 5 new patterns: SQLAlchemy `text()` with user data, Django `extra(where=[...])`, DB client `.execute`/`.query` with f-strings or template literals, `cursor.execute` with `+` concatenation, ORM `filter`/`where` with request data.
+
+7. **CWE-918 regex + sources** (queries.json) — Added 6 new patterns: aiohttp/httpx async client patterns, `urllib.parse.urljoin` chained to HTTP fetch, `got`/`node-fetch`/`superagent`/`needle`, `new URL(req...)` then fetch, `requests.get(variable)`. Added `webhook`, `endpoint`, `redirect_url`, `request.values`, `request.data`, `req.headers` sources.
+
+**Projected targets after v3 (re-run benchmark to confirm):**
+
+| CWE | Baseline Recall | Target Recall | Target F1 | Min Precision |
+|---|---:|---:|---:|---:|
+| CWE-22 | 7.19% | ≥ 55% | ≥ 70% | ≥ 85% |
+| CWE-78 | 8.40% | ≥ 55% | ≥ 70% | ≥ 85% |
+| CWE-79 | 23.08% | ≥ 55% | ≥ 70% | ≥ 85% |
+| CWE-89 | 20.94% | ≥ 50% | ≥ 65% | ≥ 85% |
+| CWE-918 | 14.95% | ≥ 40% | ≥ 57% | ≥ 85% |
+| CWE-94 | 36.16% | ≥ 45% | ≥ 60% | ≥ 90% |
+| **Overall** | **17.62%** | **≥ 55%** | **≥ 70%** | **≥ 85%** |
+
+## 3. Per-CWE Results Table
+
+### 3.1 VULCAN Per-CWE Results (v2 baseline — pre-v3 improvements)
 
 | Tool | Dataset | CWE | TP | FP | FN | TN | Precision | Recall | F1 | FP/KLOC | Runtime | Peak Memory |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -66,6 +91,18 @@ Precision remained above the 90% target
 | VULCAN | CodeQL curated corpus | CWE-918 | 29 | 0 | 165 | TBD | 100.00% | 14.95% | 26.01% | TBD | TBD | TBD |
 | VULCAN | CodeQL curated corpus | CWE-94 | 98 | 4 | 173 | TBD | 96.08% | 36.16% | 52.55% | TBD | TBD | TBD |
 | VULCAN | CodeQL curated corpus | Overall | 634 | 50 | 2,964 | 1 | 92.69% | 17.62% | 29.61% | TBD | TBD | TBD |
+
+### 3.2 VULCAN Per-CWE Results (v3 — after recall improvements, re-run required)
+
+| Tool | Dataset | CWE | TP | FP | FN | TN | Precision | Recall | F1 | FP/KLOC | Runtime | Peak Memory |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| VULCAN | CodeQL curated corpus | CWE-22 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | CWE-78 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | CWE-79 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | CWE-89 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | CWE-918 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | CWE-94 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| VULCAN | CodeQL curated corpus | Overall | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
 ### 2.2 Baseline Tool Results
 
@@ -255,13 +292,16 @@ Include:
 
 Known current limitations:
 
-- Recall remains modest at 17.62%, although improved from 12.3%.
-- Some CodeQL expected rows represent fine-grained flow locations rather than one human-level vulnerability.
-- Benchmark precision is strong, but broader real-world recall requires more framework-specific source/sink and interprocedural coverage.
+- v3 recall targets (≥55% overall) require benchmark re-run to confirm; projected from pattern coverage analysis.
+- Some CodeQL expected rows represent fine-grained flow locations (individual taint-propagation steps) rather than one human-level vulnerability, which inflates FN counts relative to real-world impact.
+- CWE-22 and CWE-78 recall improvements depend heavily on DFG taint chains being correctly built by the CPGParser for multi-step flows; regex patterns cover direct-access cases.
+- Regex patterns added in v3 may introduce additional FPs for some edge cases (e.g., `os.system(variable)` patterns may flag non-user-controlled variables). LLM classification (disabled during benchmark) would filter these at runtime.
+- CWE-94 (Code Injection) precision (96.08%) is the highest and must be preserved; the `re.compile` suppressor for CODE_INJECTION was left intact.
 - Memory profiling and FP/KLOC are not yet recorded.
-- Baseline tool comparisons are not yet recorded.
+- Baseline tool comparisons (CodeQL, Semgrep, Snyk) are not yet recorded.
 - Statistical significance tests are not yet complete.
 - Patch validation is not yet complete.
+- CWE-918 SSRF precision was 100% (0 FP) at v2; v3 new patterns may reduce this slightly while improving recall from 14.95%.
 
 ## 8. Recommended Final Report Structure
 

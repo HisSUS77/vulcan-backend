@@ -42,6 +42,12 @@ class PathDiscovery:
         source_code_map: Dict[str, str],
         query_store: QueryStore
     ) -> List[CodeSlice]:
+        # Skip path discovery for large graphs — source/sink resolution alone is
+        # O(nodes × patterns) and BFS adds little value when cross-file flows span
+        # 40+ modules.  Regex detection handles these fixtures instead.
+        if len(graph.nodes) > 3000:
+            return []
+
         # High-level flow: collect candidate sources/sinks, traverse paths,
         # score them, then emit CodeSlice objects for downstream analysis.
         node_map = {n.id: n for n in graph.nodes}
@@ -180,27 +186,33 @@ class PathDiscovery:
         adj: Dict[str, List[str]],
         node_map: Dict[str, GraphNode]
     ) -> List[List[str]]:
-        # BFS with depth and candidate limits to avoid explosion.
+        # BFS with depth, candidate, and hard operation limits to prevent queue explosion.
+        MAX_BFS_OPS = 5_000
+
         paths: List[List[str]] = []
-        queue: List[List[str]] = [[source_id]]
-        visited_paths = set()
+        from collections import deque as _deque
+        queue: _deque = _deque([[source_id]])
+        visited: set = {source_id}
+        bfs_ops = 0
 
         while queue and len(paths) < self.max_candidates:
-            path = queue.pop(0)
+            bfs_ops += 1
+            if bfs_ops > MAX_BFS_OPS:
+                break
+            path = queue.popleft()  # O(1) vs list.pop(0) which is O(n)
             if len(path) > self.max_depth:
                 continue
             current = path[-1]
             if current in sink_ids:
-                path_key = tuple(path)
-                if path_key not in visited_paths:
-                    visited_paths.add(path_key)
-                    paths.append(path)
+                paths.append(path)
                 continue
 
             for neighbor in adj.get(current, []):
                 if neighbor in path:
                     continue
-                queue.append(path + [neighbor])
+                if neighbor not in visited or neighbor in sink_ids:
+                    visited.add(neighbor)
+                    queue.append(path + [neighbor])
 
         return paths
 

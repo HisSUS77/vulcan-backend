@@ -255,27 +255,26 @@ class SemanticPipeline:
     ) -> List[CodeSlice]:
         """
         Execute all security queries against graph.
-        
-        Args:
-            graph: Unified semantic graph
-            source_code: Original source code
-        
-        Returns:
-            List of detected code slices
+        Each query runs in a thread pool so the event loop stays responsive
+        for health checks and job-status polling during long benchmark runs.
         """
         all_slices = []
         queries = self.query_store.get_all_queries()
-        
+
         for query in queries:
             try:
-                slices = self.query_executor.execute_query(
-                    graph, query, source_code, source_code_map
+                # Run the sync query executor in a thread so we don't block the
+                # event loop. This is critical for the benchmark background task
+                # which shares the loop with job-status poll requests.
+                slices = await asyncio.to_thread(
+                    self.query_executor.execute_query,
+                    graph, query, source_code, source_code_map,
                 )
                 all_slices.extend(slices)
             except Exception as e:
                 logger.error(f"Query {query.rule_id} failed: {e}")
                 continue
-        
+
         return all_slices
 
     # Runs PathDiscovery to find broad source→sink path candidates across the graph
@@ -290,7 +289,10 @@ class SemanticPipeline:
             max_candidates=self.config.max_candidate_paths,
             score_threshold=self.config.path_score_threshold
         )
-        return discovery.discover(graph, source_code_map, self.query_store)
+        # Run sync discovery in a thread — same reasoning as _execute_queries.
+        return await asyncio.to_thread(
+            discovery.discover, graph, source_code_map, self.query_store
+        )
 
     async def analyze_repository(
         self,
@@ -312,50 +314,64 @@ class SemanticPipeline:
                 repo_path,
                 allowed_files=allowed if allowed else None,
             )
-            result = repo_graph.build()
+            # build() is pure sync — run in a thread to keep event loop live.
+            result = await asyncio.to_thread(repo_graph.build)
             graph = result["global_cpg"]
 
             # Reload queries in case queries.json changed since startup
             self.query_store.reload()
 
-            # Filter source map by selected files if provided
-            source_code_map: Dict[str, str] = {}
-            repo_root_resolved = Path(repo_path).resolve()
-            for module in result["modules"]:
-                file_path = module.file_path
-                # Compute repo-relative path for allowed-set comparison
-                try:
-                    repo_rel = str(Path(file_path).resolve().relative_to(repo_root_resolved))
-                    repo_rel = repo_rel.replace("\\", "/")
-                except Exception:
-                    repo_rel = file_path.replace("\\", "/")
+            # Build source-code map in a thread — Path.read_text() for 40+ files
+            # is blocking I/O that would stall the event loop if run inline.
+            def _build_source_map() -> Dict[str, str]:
+                smap: Dict[str, str] = {}
+                repo_root_r = Path(repo_path).resolve()
+                for mod in result["modules"]:
+                    fp = mod.file_path
+                    try:
+                        rel = str(Path(fp).resolve().relative_to(repo_root_r)).replace("\\", "/")
+                    except Exception:
+                        rel = fp.replace("\\", "/")
+                    if allowed and rel not in allowed:
+                        continue
+                    try:
+                        code = Path(fp).read_text(encoding="utf-8", errors="ignore")
+                        smap[fp] = code
+                        smap[rel] = code
+                        smap[str(Path(fp).resolve())] = code
+                    except Exception:
+                        continue
+                return smap
 
-                if allowed and repo_rel not in allowed:
-                    continue
-                try:
-                    code = Path(file_path).read_text(encoding="utf-8", errors="ignore")
-                    # Store under multiple keys for flexible lookup
-                    source_code_map[file_path] = code
-                    source_code_map[repo_rel] = code
-                    abs_path = str(Path(file_path).resolve())
-                    source_code_map[abs_path] = code
-                except Exception:
-                    continue
+            source_code_map: Dict[str, str] = await asyncio.to_thread(_build_source_map)
 
             # Add dependency manifests for A06 (Vulnerable & Outdated Components)
             self._add_dependency_files(repo_path, source_code_map, allowed)
+
+            # De-duplicate source map for regex scanning.
+            # Each file is stored under 3 keys (abs path, repo-rel, original path);
+            # passing all 3 to _execute_regex_patterns would scan every file 3×,
+            # tripling regex work and GIL-hold time.  Keep only one key per unique
+            # content object so regex runs exactly once per file.
+            _seen_ids: set = set()
+            regex_source_map: Dict[str, str] = {}
+            for _key, _code in source_code_map.items():
+                _fid = id(_code)
+                if _fid not in _seen_ids:
+                    _seen_ids.add(_fid)
+                    regex_source_map[_key] = _code
 
             # Broad path discovery
             all_slices = []
             if self.config.enable_path_discovery:
                 trace_step("Pipeline step: _discover_paths() [repo]")
-                discovery_slices = await self._discover_paths(graph, source_code_map)
+                discovery_slices = await self._discover_paths(graph, regex_source_map)
                 logger.info(f"Path discovery: {len(discovery_slices)} candidate slices found")
 
-            # Always augment with rule-based queries (use concatenated source if needed)
-            concat_source = "\n".join(source_code_map.values()) if source_code_map else ""
+            # Always augment with rule-based queries
+            concat_source = "\n".join(regex_source_map.values()) if regex_source_map else ""
             trace_step("Pipeline step: _execute_queries() [repo]")
-            query_slices = await self._execute_queries(graph, concat_source, source_code_map)
+            query_slices = await self._execute_queries(graph, concat_source, regex_source_map)
             if discovery_slices:
                 discovery_slices = self._filter_discovery_slices(discovery_slices, query_slices)
             all_slices = (discovery_slices or []) + query_slices

@@ -81,7 +81,7 @@ class QueryExecutor:
             List of detected code slices (potential vulnerabilities)
         """
         logger.debug(f"Executing query: {query.rule_id}")
-        
+
         # Regex/setting-based rules (no source/sink required).
         regex_slices = self._execute_regex_patterns(query, source_code, source_code_map)
 
@@ -509,38 +509,52 @@ class QueryExecutor:
         Returns:
             List of paths (node ID lists)
         """
+        # Adaptive BFS cap: give small graphs (few adjacency entries) more exploration
+        # budget — they're fast and need deeper traversal to find taint paths.
+        # Large graphs get a tighter cap to keep wall-clock time bounded.
+        adj_total = sum(len(v) for v in adj_list.values())
+        if adj_total < 1_000:
+            MAX_BFS_OPS = 30_000   # small fixture, ≤ ~300 ms/rule in thread
+        elif adj_total < 5_000:
+            MAX_BFS_OPS = 15_000   # medium fixture
+        else:
+            MAX_BFS_OPS = 5_000    # large fixture, keeps thread task < ~5 s
+
         paths = []
         queue = deque([(start, [start])])
-        visited_paths = set()
-        
+        # Track per-node reachability instead of full path tuples — O(n) not O(n*L).
+        visited: Set[str] = {start}
+        bfs_ops = 0
+
         node_map = {n.id: n for n in graph.nodes}
-        
+
         while queue and len(paths) < self.max_paths_per_rule:
+            bfs_ops += 1
+            if bfs_ops > MAX_BFS_OPS:
+                break
             current, path = queue.popleft()
-            
-        # Check if we reached a target.
+
+            # Check if we reached a target.
             if current in targets:
                 paths.append(path)
                 continue
-            
+
             # Check path length limit.
             if len(path) >= self.max_path_length:
                 continue
-            
+
             # Explore neighbors.
             for neighbor in adj_list.get(current, []):
-                if neighbor in path:  # Avoid cycles
+                if neighbor in path:  # Avoid cycles within the current path
                     continue
-                
-                # Do not skip sanitizers; handle in slice confidence.
-                
+
                 new_path = path + [neighbor]
-                path_key = tuple(new_path)
-                
-                if path_key not in visited_paths:
-                    visited_paths.add(path_key)
+                # Only enqueue if this edge would bring us closer to a sink or
+                # is a novel node — avoids re-expanding the same subtree.
+                if neighbor not in visited or neighbor in targets:
+                    visited.add(neighbor)
                     queue.append((neighbor, new_path))
-        
+
         return paths
     
     def _is_sanitizer(self, node: GraphNode, sanitizers: Set[str]) -> bool:

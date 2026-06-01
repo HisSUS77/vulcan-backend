@@ -421,8 +421,18 @@ class SliceClassifier:
         r"(?:''\s*\+\s*query|\.substr\s*\(|req\.body\s+is\s+safe|only\s+by\s+string\s+value|typeof\s+\w+\s*===\s*['\"]string['\"])",
         re.IGNORECASE,
     )
-    _SUBPROCESS_LIST    = re.compile(r'subprocess\.(?:run|Popen|call|check_output)\s*\(\s*\[', re.IGNORECASE)
-    _EXECFILE_ARRAY     = re.compile(r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', re.IGNORECASE)
+    # Only safe when the subprocess list contains EXCLUSIVELY string literals — no variable args.
+    # subprocess.run(['sh', '-c', user_input]) is still vulnerable (argument injection).
+    _SUBPROCESS_LIST    = re.compile(
+        r'subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(\s*'
+        r'\[\s*(?:[\'"][^\'"]*[\'"](?:\s*,\s*[\'"][^\'"]*[\'"])*\s*)\]',
+        re.IGNORECASE,
+    )
+    # execFile safe only when binary AND args list are BOTH exclusively string literals.
+    _EXECFILE_ARRAY     = re.compile(
+        r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[\s*(?:[\'"][^\'"]*[\'"](?:\s*,\s*[\'"][^\'"]*[\'"])*\s*)?\]',
+        re.IGNORECASE,
+    )
     _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
     # Static template: render_template_string('<literal>', keyword=args) — safe with Jinja2 autoescape
     _STATIC_TEMPLATE    = re.compile(r"render_template_string\s*\(\s*['\"]", re.IGNORECASE)
@@ -436,8 +446,19 @@ class SliceClassifier:
     )
     _ALLOWLIST_CHECK    = re.compile(r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse)\s*\(', re.IGNORECASE)
     # Path traversal sanitization: normpath + startswith prefix check
-    _PATH_NORMPATH_SAFE = re.compile(r'os\.path\.normpath|path\.normalize', re.IGNORECASE)
-    _PATH_STARTSWITH    = re.compile(r'startswith\s*\(', re.IGNORECASE)
+    # realpath/abspath + startswith in close proximity — strong sanitizer.
+    _PATH_REALPATH_PREFIX = re.compile(
+        r'os\.path\.(?:realpath|abspath)\s*\([^)]+\)[^\n]{0,120}\.startswith\s*\('
+        r'|\.resolve\s*\(\s*\)[^\n]{0,120}\.startswith\s*\(',
+        re.IGNORECASE | re.DOTALL,
+    )
+    # normpath + startswith guard where `open` is INSIDE the indented if-block.
+    # Pattern: `if <var>.startswith(...):\n    ... open(` — open is indented after the guard.
+    # Does NOT fire when open is outside/after the if block (that's still vulnerable).
+    _PATH_NORMPATH_GUARD_OPEN = re.compile(
+        r'if\s+\w[\w.]*\.startswith\s*\([^)]+\)\s*:[^\n]*\n[ \t]+[^\n]*(?:open|send_file|read_file)\s*\(',
+        re.IGNORECASE,
+    )
     _SENDFILE_ROOT_SAFE = re.compile(
         r'res\.sendfile?\s*\([^)]*(?:\{\s*root\s*:|homeDir\s*\+\s*[\'"]/data/|[\'"]data/[\'"]\s*\+)',
         re.IGNORECASE,
@@ -470,7 +491,9 @@ class SliceClassifier:
             if re.search(r'\bre\.compile\s*\(', code):
                 return True
         if rule_id == "PATH_TRAVERSAL":
-            if self._PATH_NORMPATH_SAFE.search(code) and self._PATH_STARTSWITH.search(code):
+            if self._PATH_REALPATH_PREFIX.search(code):
+                return True
+            if self._PATH_NORMPATH_GUARD_OPEN.search(code):
                 return True
             if self._SENDFILE_ROOT_SAFE.search(code) or self._NORMALIZE_PREFIX_STRIP.search(code):
                 return True
