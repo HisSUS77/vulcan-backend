@@ -6,7 +6,8 @@ from app.api.deps import get_current_user, get_mongo_db
 from app.services.benchmark_service import BenchmarkService
 from app.services.confirmation_service import ConfirmationService
 from app.schemas.benchmark import (
-    TestCase, TestCaseCreate, BenchmarkRun, LeaderboardEntry, BenchmarkRunRequest
+    TestCase, TestCaseCreate, BenchmarkRun, LeaderboardEntry, BenchmarkRunRequest,
+    CodeQLBenchmarkRunRequest, BenchmarkJob
 )
 from app.schemas.confirmation import ConfirmedFinding, FieldMetrics, SpotCheckVerdict
 from app.db.seed_benchmark import SEED_CASES
@@ -20,6 +21,26 @@ def _svc(db: AsyncIOMotorDatabase = Depends(get_mongo_db)) -> BenchmarkService:
 
 def _conf(db: AsyncIOMotorDatabase = Depends(get_mongo_db)) -> ConfirmationService:
     return ConfirmationService(db)
+
+
+async def _run_codeql_corpus_job(
+    db: AsyncIOMotorDatabase,
+    job_id: str,
+    body: CodeQLBenchmarkRunRequest,
+) -> None:
+    svc = BenchmarkService(db)
+    try:
+        await svc.mark_benchmark_job_running(job_id)
+        run = await svc.run_codeql_corpus_benchmark(
+            enable_llm=body.enable_llm,
+            roots=body.roots,
+            line_tolerance=body.line_tolerance,
+            limit=body.limit,
+            supported_only=body.supported_only,
+        )
+        await svc.mark_benchmark_job_completed(job_id, run.id)
+    except Exception as exc:
+        await svc.mark_benchmark_job_failed(job_id, str(exc))
 
 
 # ── Test Cases ────────────────────────────────────────────────────────────────
@@ -70,6 +91,49 @@ async def run_benchmark(
     """Run all test cases through the scanner and save results."""
     await svc.seed_if_empty(SEED_CASES)
     return await svc.run_benchmark(enable_llm=body.enable_llm)
+
+
+@router.post("/run-codeql-corpus", response_model=BenchmarkRun)
+async def run_codeql_corpus_benchmark(
+    body: CodeQLBenchmarkRunRequest = CodeQLBenchmarkRunRequest(),
+    svc: BenchmarkService           = Depends(_svc),
+    _user=Depends(get_current_user),
+):
+    """Run the independently auditable CodeQL fixture corpus benchmark."""
+    return await svc.run_codeql_corpus_benchmark(
+        enable_llm=body.enable_llm,
+        roots=body.roots,
+        line_tolerance=body.line_tolerance,
+        limit=body.limit,
+        supported_only=body.supported_only,
+    )
+
+
+@router.post("/run-codeql-corpus-job", response_model=BenchmarkJob, status_code=status.HTTP_202_ACCEPTED)
+async def start_codeql_corpus_benchmark_job(
+    background_tasks: BackgroundTasks,
+    body: CodeQLBenchmarkRunRequest = CodeQLBenchmarkRunRequest(),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    _user=Depends(get_current_user),
+):
+    """Start the CodeQL corpus benchmark asynchronously and return a pollable job."""
+    svc = BenchmarkService(db)
+    job = await svc.create_benchmark_job(run_type="codeql-corpus")
+    background_tasks.add_task(_run_codeql_corpus_job, db, job.id, body)
+    return job
+
+
+@router.get("/jobs/{job_id}", response_model=BenchmarkJob)
+async def get_benchmark_job(
+    job_id: str,
+    svc: BenchmarkService = Depends(_svc),
+    _user=Depends(get_current_user),
+):
+    """Get benchmark job status. When completed, use run_id to fetch persisted results."""
+    job = await svc.get_benchmark_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Benchmark job not found")
+    return job
 
 
 @router.get("/runs", response_model=List[BenchmarkRun])

@@ -123,6 +123,24 @@ class SliceClassifier:
             reverse=True,
         )
 
+        if not self.enable_llm:
+            classified = []
+            for s in sorted_slices:
+                r = self._fallback_classify(s)
+                if r:
+                    classified.append(r)
+            classified.sort(
+                key=lambda v: (
+                    self._severity_rank(v.final_severity),
+                    -v.final_confidence
+                )
+            )
+            logger.info(
+                f"Classified {len(classified)} vulnerabilities | "
+                f"LLM disabled | total slices={len(slices)}"
+            )
+            return classified
+
         # Separate slices that need LLM from those that don't
         llm_slices    = [s for s in sorted_slices if _needs_llm(s)]
         static_slices = [s for s in sorted_slices if not _needs_llm(s)]
@@ -224,6 +242,8 @@ class SliceClassifier:
     def _fallback_classify(self, slice_obj: "CodeSlice") -> Optional["ClassifiedVulnerability"]:
         """Fast path for slices beyond the LLM cap — static result only."""
         llm_result = self._get_static_only_result(slice_obj)
+        if self._code_is_safe(slice_obj.rule_id, slice_obj.code_snippet):
+            return None
         final_severity, final_confidence, is_vulnerable = self._combine_results(slice_obj, llm_result)
         if not is_vulnerable:
             return None
@@ -375,7 +395,7 @@ class SliceClassifier:
         )
     
     # Patterns that definitively indicate safe code — override LLM VULNERABLE verdicts.
-    # Parameterized SQL: execute/query with %s, ?, or $N placeholder + tuple/array arg
+    # Parameterized SQL: execute/query/raw with %s, ?, or $N placeholder plus bind args.
     _PARAMETERIZED_SQL  = re.compile(
         r'(?:execute|query)\s*\(\s*[\'"][^\'"]*(?:%s|\$\d+)[^\'"]*[\'"],\s*[\[\(]',
         re.IGNORECASE,
@@ -384,15 +404,48 @@ class SliceClassifier:
         r'(?:execute|query)\s*\(\s*[\'"][^\'"]*\?[^\'"]*[\'"],\s*[\[\(]',
         re.IGNORECASE,
     )
+    _PARAMETERIZED_SQL_BIND = re.compile(
+        r'(?:execute|query|raw)\s*\(\s*[\'"][\s\S]{0,300}(?:%s|\$\d+|\?)[\s\S]{0,300}[\'"]\s*,\s*'
+        r'(?:[a-zA-Z_]\w*|\([^)]+\)|\[[^\]]+\]|\{[^}]+\})',
+        re.IGNORECASE,
+    )
+    _SQLALCHEMY_ATTR_COMPARE = re.compile(
+        r'\.where\s*\([^)]*\.[a-zA-Z_]\w*\s*==\s*[a-zA-Z_]\w*\s*\)',
+        re.IGNORECASE,
+    )
+    _JS_QUERY_ARRAY_ARGS = re.compile(
+        r'\.(?:query|execute)\s*\(\s*[a-zA-Z_]\w*\s*,\s*\[\s*(?:req\.|request\.|[a-zA-Z_]\w+)',
+        re.IGNORECASE,
+    )
+    _MONGO_STRING_ONLY_SAFE = re.compile(
+        r"(?:''\s*\+\s*query|\.substr\s*\(|req\.body\s+is\s+safe|only\s+by\s+string\s+value|typeof\s+\w+\s*===\s*['\"]string['\"])",
+        re.IGNORECASE,
+    )
     _SUBPROCESS_LIST    = re.compile(r'subprocess\.(?:run|Popen|call|check_output)\s*\(\s*\[', re.IGNORECASE)
     _EXECFILE_ARRAY     = re.compile(r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', re.IGNORECASE)
     _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
     # Static template: render_template_string('<literal>', keyword=args) — safe with Jinja2 autoescape
     _STATIC_TEMPLATE    = re.compile(r"render_template_string\s*\(\s*['\"]", re.IGNORECASE)
+    _HTML_ESCAPE_SAFE   = re.compile(r'\b(?:escape|escapeHtml)\s*\(', re.IGNORECASE)
+    _XSS_ENCODE_SAFE    = re.compile(r'\bencodeURIComponent\s*\(|\.split\s*\(\s*["\']\?["\']\s*\)\s*\[\s*0\s*\]', re.IGNORECASE)
+    _XSS_QUOTE_GUARD_SAFE = re.compile(r'indexOf\s*\(\s*["\']\\?["\']\s*\)\s*!==\s*-1', re.IGNORECASE)
+    _XSS_STATIC_JQUERY_SAFE = re.compile(r'\$\s*\(\s*["\']<[^"\']*["\']\s*\+\s*\$\.trim\s*\(\s*["\']', re.IGNORECASE)
+    _TEXT_PLAIN_RESPONSE = re.compile(
+        r"res\.set\s*\(\s*['\"]Content-Type['\"]\s*,\s*(?:['\"]text/plain['\"]|textContentType\s*\()",
+        re.IGNORECASE,
+    )
     _ALLOWLIST_CHECK    = re.compile(r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse)\s*\(', re.IGNORECASE)
     # Path traversal sanitization: normpath + startswith prefix check
     _PATH_NORMPATH_SAFE = re.compile(r'os\.path\.normpath|path\.normalize', re.IGNORECASE)
     _PATH_STARTSWITH    = re.compile(r'startswith\s*\(', re.IGNORECASE)
+    _SENDFILE_ROOT_SAFE = re.compile(
+        r'res\.sendfile?\s*\([^)]*(?:\{\s*root\s*:|homeDir\s*\+\s*[\'"]/data/|[\'"]data/[\'"]\s*\+)',
+        re.IGNORECASE,
+    )
+    _NORMALIZE_PREFIX_STRIP = re.compile(
+        r'[\'"]prefix[\'"]\s*\+\s*pathModule\.normalize\s*\(\s*path\s*\)\.replace\s*\(',
+        re.IGNORECASE,
+    )
 
     _SAFE_RULES_PATTERNS: dict = {}  # populated lazily per rule_id
 
@@ -401,7 +454,14 @@ class SliceClassifier:
         if self._DEFUSEDXML.search(code):
             return True
         if rule_id in ("SQL_INJECTION", "NOSQL_INJECTION", "BROKEN_ACCESS_CONTROL"):
-            if self._PARAMETERIZED_SQL.search(code) or self._PARAMETERIZED_SQL2.search(code):
+            if (
+                self._PARAMETERIZED_SQL.search(code)
+                or self._PARAMETERIZED_SQL2.search(code)
+                or self._PARAMETERIZED_SQL_BIND.search(code)
+                or self._SQLALCHEMY_ATTR_COMPARE.search(code)
+                or self._JS_QUERY_ARRAY_ARGS.search(code)
+                or self._MONGO_STRING_ONLY_SAFE.search(code)
+            ):
                 return True
         if rule_id in ("COMMAND_INJECTION", "CODE_INJECTION"):
             if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
@@ -412,8 +472,17 @@ class SliceClassifier:
         if rule_id == "PATH_TRAVERSAL":
             if self._PATH_NORMPATH_SAFE.search(code) and self._PATH_STARTSWITH.search(code):
                 return True
+            if self._SENDFILE_ROOT_SAFE.search(code) or self._NORMALIZE_PREFIX_STRIP.search(code):
+                return True
         if rule_id in ("TEMPLATE_INJECTION", "XSS"):
-            if self._STATIC_TEMPLATE.search(code):
+            if (
+                self._STATIC_TEMPLATE.search(code)
+                or self._HTML_ESCAPE_SAFE.search(code)
+                or self._XSS_ENCODE_SAFE.search(code)
+                or self._XSS_QUOTE_GUARD_SAFE.search(code)
+                or self._XSS_STATIC_JQUERY_SAFE.search(code)
+                or self._TEXT_PLAIN_RESPONSE.search(code)
+            ):
                 return True
         if rule_id in ("SSRF", "UNVALIDATED_REDIRECT"):
             if self._ALLOWLIST_CHECK.search(code):

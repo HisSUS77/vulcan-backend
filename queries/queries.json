@@ -41,9 +41,17 @@
       "connection.execute",
       "db.execute",
       "Model.objects.raw",
+      "User.objects.raw",
+      "User.objects.extra",
+      "RawSQL",
       "sequelize.query",
       "knex.raw",
       "db.query",
+      "db.get",
+      "db.all",
+      "db.run",
+      "pool.query",
+      "client.query",
       "connection.query"
     ],
     "patterns": [
@@ -68,7 +76,12 @@
       "f['\"][^\\n]*(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\{[^}]+\\}",
       "['\"](?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*(?:\\{\\}|\\{\\d+\\}|\\{\\w+\\})[^'\"]*['\"]",
       "['\"](?:SELECT|INSERT|UPDATE|DELETE)[^'\"]*%[sd][^'\"]*['\"][^\\n]*%\\s*(?:[a-zA-Z_(]|\\()",
+      "(?:execute|raw|extra|RawSQL|text)\\s*\\([^\\n]*(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*%\\s*(?:[a-zA-Z_(]|\\()",
       "`(?:SELECT|INSERT|UPDATE|DELETE)[^`]*\\$\\{[^}]+\\}[^`]*`",
+      "(?:QueryString|QueryStatement)\\s*:\\s*(?:req\\.|[a-zA-Z_]\\w*|['\"`][^\\n]*(?:\\+|\\$\\{))",
+      "new\\s+(?:StartQueryExecutionCommand|CreateNamedQueryCommand|UpdateNamedQueryCommand|CreatePreparedStatementCommand|BatchExecuteStatementCommand)\\s*\\(",
+      "\\.(?:startQueryExecution|createNamedQuery|updateNamedQuery|execute|exec|prepare|query)\\s*\\([^\\n]*(?:req\\.|userQuery|maliciousInput|input|query|\\+|\\$\\{)",
+      "\\.(?:find|findOne|findMany|aggregate|where|mapReduce|update|remove|deleteOne|deleteMany)\\s*\\([^\\n]*(?:req\\.|request\\.|\\$where|query|filter|criteria|data)",
       "\\.raw\\s*\\(\\s*(?:f['\"]|[a-zA-Z_]\\w*\\s*(?:\\+|%|\\.))",
       "text\\s*\\(\\s*(?:f['\"]|[^'\"\\s\\)][^)]*(?:\\+|\\{))",
       "(?:SELECT|INSERT|UPDATE|DELETE)[^\\n]*\\.format\\s*\\([^)]*[a-zA-Z_]"
@@ -98,16 +111,30 @@
       "input",
       "sys.argv",
       "process.argv"
+      ,"url.parse"
+      ,"location.search"
     ],
     "sinks": [
       "os.system",
       "subprocess.call",
+      "subprocess.check_call",
       "subprocess.Popen",
       "subprocess.run",
       "os.popen",
       "child_process.exec",
       "child_process.spawn",
-      "child_process.execSync"
+      "child_process.execSync",
+      "child_process.execFile",
+      "child_process.execFileSync",
+      "child_process.spawnSync",
+      "child_process.fork",
+      "cp.exec",
+      "cp.execSync",
+      "cp.execFile",
+      "cp.execFileSync",
+      "cp.spawn",
+      "cp.spawnSync",
+      "cp.fork"
     ],
     "patterns": [
       "DFG_FLOW",
@@ -125,9 +152,14 @@
       "[^\\n]*(?:\\+[^\\n]*[a-zA-Z_]|(?:request\\.|req\\.)[^\\n]*)shell\\s*[=:]\\s*[Tt]rue|shell\\s*[=:]\\s*[Tt]rue[^\\n]*(?:\\+[^\\n]*[a-zA-Z_]|request\\.|req\\.)",
       "commands\\.getoutput\\s*\\(",
       "commands\\.getstatusoutput\\s*\\(",
+      "subprocess\\.(?:run|call|check_call|Popen)\\s*\\([^)]*shell\\s*=\\s*True",
       "child_process\\.exec\\s*\\(",
       "child_process\\.execSync\\s*\\(",
       "execSync\\s*\\([^)]*(?:req\\.|request\\.)",
+      "(?:cp\\.)?(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\\s*\\(\\s*(?!['\\\"`])(?:cmd|command|path|file|filename)\\b",
+      "(?:cp\\.)?(?:exec|execSync)\\s*\\([^\\n]*(?:\\+\\s*(?:cmd|command|path)|(?:cmd|command|path)\\s*\\+)",
+      "(?:cp\\.)?(?:spawn|execFile)\\s*\\([^\\n]*\\[(?:[^\\]]*,)*\\s*(?:cmd|command|path)\\s*(?:,|\\])",
+      "url\\.parse\\s*\\([^)]*req\\.url[^)]*\\)\\.query\\.[a-zA-Z_]\\w*[\\s\\S]{0,400}(?:cp\\.)?(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\\s*\\(",
       "spawn\\s*\\([^)]*(?:\\+[^)]*[a-zA-Z_]|(?<!['\\\"])\\b[a-zA-Z_]\\w*\\s*,)[^)]*shell\\s*:\\s*true",
       "execSync\\s*\\(\\s*(?!['\\\"`])(?!timeout\\b)(?!options\\b)[a-zA-Z_]\\w*\\s*[).]"
     ]
@@ -140,7 +172,9 @@
     "description": "User input flows to code evaluation or dynamic execution",
     "severity": "critical",
     "languages": [
-      "python"
+      "python",
+      "javascript",
+      "typescript"
     ],
     "sources": [
       "request.GET",
@@ -161,7 +195,10 @@
       "exec",
       "execfile",
       "compile",
-      "__import__"
+      "__import__",
+      "Function",
+      "setTimeout",
+      "setInterval"
     ],
     "patterns": [
       "DFG_FLOW",
@@ -176,7 +213,17 @@
       "(?<![a-zA-Z0-9_.])(?<!literal_)eval\\s*\\(",
       "(?<![a-zA-Z0-9_])exec\\s*\\(",
       "(?<![a-zA-Z0-9_])execfile\\s*\\((?![^,)]*['\\\"][^'\\\"]*['\\\"],\\s*\\[)",
-      "__import__\\s*\\("
+      "__import__\\s*\\(",
+      "new\\s+Function\\s*\\(",
+      "Function\\s*\\([^)]*(?:req\\.|request\\.|location\\.|params|query|body)",
+      "(?:setTimeout|setInterval)\\s*\\([^,)]*(?:req\\.|request\\.|location\\.|params|query|body|\\+)",
+      "\\$scope\\.(?:\\$apply|\\$applyAsync|\\$eval|\\$evalAsync|\\$watch|\\$watchCollection|\\$watchGroup)\\s*\\([^\\n]*location\\.",
+      "\\$(?:compile|parse|interpolate)\\s*\\([^\\n]*location\\.",
+      "\\$filter\\s*\\([^\\n]*['\"]orderBy['\"][^\\n]*location\\.",
+      "(?:require\\(['\"]vm['\"]\\)\\.)?(?:runInThisContext|runInNewContext|runInContext|compileFunction|Script|SourceTextModule)\\s*\\([^\\n]*(?:req\\.|location\\.|taint|msg)",
+      "(?:cp\\.)?execFileSync\\s*\\([^\\n]*['\"]-e['\"][^\\n]*(?:taint|req\\.|location\\.)",
+      "\\.write\\s*\\([^\\n]*(?:taint|msg|req\\.|location\\.)",
+      "WebAssembly\\.(?:compile|compileStreaming|instantiate|instantiateStreaming)\\s*\\([^\\n]*(?:location\\.|document\\.|req\\.|request\\.)"
     ]
   },
   "XSS": {
@@ -200,7 +247,8 @@
       "req.params",
       "location.search",
       "location.hash",
-      "document.URL"
+      "document.URL",
+      "request.data"
     ],
     "sinks": [
       "render_template_string",
@@ -210,7 +258,10 @@
       "innerHTML",
       "outerHTML",
       "document.write",
-      "dangerouslySetInnerHTML"
+      "dangerouslySetInnerHTML",
+      "make_response",
+      "res.send",
+      "send"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -227,6 +278,16 @@
       "\\.outerHTML\\s*=",
       "document\\.write\\s*\\(",
       "dangerouslySetInnerHTML",
+      "bypassSecurityTrustHtml\\s*\\(",
+      "renderer\\.setProperty\\s*\\([^\\n]*['\"]innerHTML['\"]",
+      "\\.html\\s*\\([^\\n]*(?:location|window\\.|getTaint|taint|req\\.|request\\.|\\$\\{|\\+)",
+      "\\.replaceWith\\s*\\([^\\n]*(?:location|window\\.|taint|req\\.|request\\.|=>)",
+      "\\$\\s*\\(\\s*(?:['\"`]<[^\\n]*(?:\\+|\\$\\{)|[^)]*(?:substring|substr|slice|replace)\\s*\\()",
+      "(?:clipboardData|dataTransfer)\\.getData\\s*\\(\\s*['\"]text/html['\"]",
+      "Cookie\\.get\\s*\\([^)]*unsafe[^)]*\\)",
+      "make_response\\s*\\([^\\n]*(?:request\\.|req\\.|\\+\\s*(?:first_name|data)|json\\.dumps\\s*\\(\\s*data)",
+      "res\\.send\\s*\\([^\\n]*(?:req\\.|request\\.|params\\.|body\\b|marked\\(|snarkdown|render\\(|processSync|invalidKeys)",
+      "return\\s+(?:request\\.|req\\.|request\\.query|req\\.query)",
       "render_template_string\\s*\\(\\s*(?:[^'\"\\s\\)])",
       "Markup\\s*\\([^)]*(?:f['\"]|request\\.|req\\.|\\+)"
     ]
@@ -270,11 +331,8 @@
       "DFG_FLOW"
     ],
     "sanitizers": [
-      "os.path.abspath",
-      "os.path.realpath",
       "path.resolve",
       "allowlist",
-      "os.path.normpath",
       "path.normalize",
       "safe_join"
     ],
@@ -282,8 +340,14 @@
     "regex_patterns": [
       "open\\s*\\([^)]*\\+",
       "open\\s*\\([^)]*user",
+      "open\\s*\\(\\s*(?:npath|path|possibly_unsafe_path|filename|file_name|filepath)\\b",
       "os\\.path\\.join\\s*\\([^)]*(?:request|args|query|param|user)",
+      "os\\.path\\.(?:normpath|realpath|abspath)\\s*\\([^)]*os\\.path\\.join\\s*\\([^)]*(?:request|filename|path|user)",
       "pathlib\\.Path\\s*\\([^)]*\\+",
+      "fs\\.(?:readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream)\\s*\\([^\\n]*(?:pathModule\\.(?:dirname|join|normalize|relative|resolve|toNamespacedPath)|require\\(['\"]query|req\\.(?:url|query|params|body))",
+      "fs\\.realpath(?:Sync)?\\s*\\(\\s*path\\b",
+      "res\\.render\\s*\\([^\\n]*req\\.params",
+      "(?:mkdirp|makeDir|ensureDir|outputFile|copy|move|remove)\\s*\\([^\\n]*(?:req\\.|path\\b|file\\b)",
       "send_file\\s*\\([^)]*(?:request\\.args|request\\.form|request\\.get|request\\.values)",
       "res\\.sendFile\\s*\\([^)]*(?:req\\.(?:query|params|body))",
       "path\\.join\\s*\\([^)]*req\\.(?:query|params|body)",
@@ -319,19 +383,35 @@
       "url",
       "callback_url",
       "avatar_url",
-      "target"
+      "target",
+      "unsafe_host",
+      "unsafe_path",
+      "full_url",
+      "request.url"
     ],
     "sinks": [
       "requests.get",
       "requests.post",
+      "requests.request",
+      "Session.get",
+      "session.get",
       "urllib.request.urlopen",
       "httpx.get",
       "httpx.post",
       "fetch",
+      "request",
+      "request.get",
+      "got",
       "axios.get",
       "axios.post",
       "http.get",
-      "https.get"
+      "https.get",
+      "JSDOM.fromURL",
+      "WebSocket",
+      "Page.navigate",
+      "SecretClient",
+      "KeyClient",
+      "download_blob_from_url"
     ],
     "patterns": [
       "DFG_FLOW"
@@ -343,8 +423,14 @@
     "confidence": "medium",
     "regex_patterns": [
       "requests\\.(get|post|put|delete|request)\\s*\\([^)]*(?:request\\.|req\\.)",
+      "requests\\.(?:get|post|put|delete|request)\\s*\\(\\s*(?:user_input|url|full_url|unsafe_host|unsafe_path)\\b",
+      "(?:session|client)\\.(?:get|post|put|delete|request)\\s*\\(\\s*(?:user_input|url|full_url)\\b",
       "urllib\\.request\\.urlopen\\s*\\([^)]*(?:request\\.|req\\.)",
       "httpx\\.(get|post)\\s*\\([^)]*(?:request\\.|req\\.)",
+      "(?:request|get|got)\\s*\\(\\s*(?:tainted|url|target|custom)\\b",
+      "(?:request\\.get|JSDOM\\.fromURL|new\\s+WebSocket|new\\s+ws|axios\\.get|fetch)\\s*\\(\\s*(?:tainted|url|target|custom|myUrl)\\b",
+      "Page\\.navigate\\s*\\(\\s*\\{\\s*url\\s*:\\s*(?:tainted|url|target)",
+      "(?:SecretClient|KeyClient|download_blob_from_url)\\s*\\([^)]*(?:full_url|url|unsafe_host|unsafe_path)",
       "request\\.(?:args|form|json|get_json)(?:\\.get)?\\s*\\(['\"](?:url|URL|callback|target|redirect|hook|endpoint|src|href)['\"]\\)[\\s\\S]{0,400}(?:requests?\\.(get|post)|urlopen|httpx\\.(?:get|post)|axios\\.(?:get|post)|fetch)\\s*\\(",
       "(?![\\s\\S]{0,600}(?:ALLOWED\\w*\\.has|allowedHosts|allowlist|validateUrl))req\\.(?:query|body|params)\\.(?:url|URL|callback|target|redirect|hook|endpoint)[\\s\\S]{0,400}(?:axios\\.(?:get|post)|fetch\\s*\\(|http\\.(?:get|request)|https\\.(?:get|request))",
       "urllib\\.request\\.urlopen\\s*\\([a-zA-Z_]",
@@ -1357,7 +1443,7 @@
     "sinks": [],
     "patterns": [],
     "regex_patterns": [
-      "debug\\s*=\\s*True",
+      "[Dd][Ee][Bb][Uu][Gg]\\s*=\\s*True",
       "app\\.run\\(.*debug\\s*=\\s*True",
       "return\\s+str\\s*\\(\\s*e\\s*\\)",
       "traceback\\.format_exc\\s*\\(",

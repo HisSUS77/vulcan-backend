@@ -14,6 +14,7 @@ from collections import defaultdict
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.services.benchmark_service import BenchmarkService, _metrics
+from app.benchmark.codeql_corpus import CodeQLCorpusCase, ExpectedFinding
 
 
 def _make_tc(label: str, cwe: str = "CWE-89", language: str = "python") -> dict:
@@ -158,7 +159,7 @@ class TestCWEBucketing:
             p, r, f1, fpr = _metrics(b["tp"], b["fp"], b["fn"], b["tn"])
             if cwe == "CWE-89":
                 assert p == 1.0
-                assert f1 == 0.0  # recall=0 because fn=0 but tp/(tp+fn)=1 wait...
+                assert f1 == 1.0
                 # tp=3, fp=0, fn=0, tn=0 → precision=1, recall=1, f1=1
             if cwe == "CWE-79":
                 # tp=0, fp=1 → precision=0
@@ -220,6 +221,63 @@ class TestBenchmarkServiceRun:
         assert run.recall == 0.0
 
     @pytest.mark.asyncio
+    async def test_codeql_corpus_scans_each_fixture_once(self, svc, tmp_path):
+        fixture_dir = tmp_path / "fixture"
+        fixture_dir.mkdir()
+        expected_a = fixture_dir / "A.expected"
+        expected_b = fixture_dir / "B.expected"
+        expected_a.write_text("", encoding="utf-8")
+        expected_b.write_text("", encoding="utf-8")
+
+        cases = [
+            CodeQLCorpusCase(
+                case_id="a",
+                name="fixture/A.expected",
+                language="javascript",
+                cwe="CWE-89",
+                query="Security/CWE-089/SqlInjection.ql",
+                fixture_dir=fixture_dir,
+                expected_file=expected_a,
+                qlref_file=None,
+                source_files=["app.js"],
+                expected_findings=[
+                    ExpectedFinding("app.js", 10, 1, 10, 12),
+                ],
+            ),
+            CodeQLCorpusCase(
+                case_id="b",
+                name="fixture/B.expected",
+                language="javascript",
+                cwe="CWE-89",
+                query="Security/CWE-089/DatabaseAccesses.ql",
+                fixture_dir=fixture_dir,
+                expected_file=expected_b,
+                qlref_file=None,
+                source_files=["app.js"],
+                expected_findings=[
+                    ExpectedFinding("app.js", 20, 1, 20, 12),
+                ],
+            ),
+        ]
+
+        pipeline = MagicMock()
+        pipeline.analyze_repository = AsyncMock(return_value=MagicMock(
+            success=True,
+            vulnerabilities=[
+                {"type": "SQL Injection", "cwe": "CWE-89", "confidence": 0.9, "location": {"file": str(fixture_dir / "app.js"), "start_line": 10}},
+                {"type": "SQL Injection", "cwe": "CWE-89", "confidence": 0.9, "location": {"file": str(fixture_dir / "app.js"), "start_line": 20}},
+            ],
+        ))
+
+        with patch("app.services.benchmark_service.discover_codeql_cases", return_value=cases), \
+             patch("app.services.benchmark_service.pipeline_module.get_pipeline", return_value=pipeline):
+            run = await svc.run_codeql_corpus_benchmark(supported_only=False)
+
+        assert pipeline.analyze_repository.await_count == 1
+        assert run.tp == 2
+        assert run.fp == 0
+
+    @pytest.mark.asyncio
     async def test_false_positives_on_safe_code(self, svc, mongo_db):
         cases = [_make_tc("safe") for _ in range(4)]
         mongo_db.benchmark_test_cases.insert_many(cases)
@@ -242,7 +300,7 @@ class TestBenchmarkServiceRun:
             run = await svc.run_benchmark(enable_llm=False)
 
         assert run.id is not None
-        stored = await mongo_db.benchmark_runs.find_one({"_id": ObjectId(run.id)})
+        stored = mongo_db.benchmark_runs.find_one({"_id": ObjectId(run.id)})
         assert stored is not None
 
     @pytest.mark.asyncio
