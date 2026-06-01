@@ -110,6 +110,8 @@ def parse_expected_file(expected_file: Path) -> list[ExpectedFinding]:
     """
     lines = expected_file.read_text(encoding="utf-8", errors="ignore").splitlines()
     has_select = any(line.strip() == "#select" for line in lines)
+    if not has_select:
+        return []
     in_select = not has_select
     findings: list[ExpectedFinding] = []
     seen: set[tuple[str, int, int, int, int]] = set()

@@ -413,12 +413,23 @@ class SliceClassifier:
         r'\.where\s*\([^)]*\.[a-zA-Z_]\w*\s*==\s*[a-zA-Z_]\w*\s*\)',
         re.IGNORECASE,
     )
+    _JS_QUERY_ARRAY_ARGS = re.compile(
+        r'\.(?:query|execute)\s*\(\s*[a-zA-Z_]\w*\s*,\s*\[\s*(?:req\.|request\.|[a-zA-Z_]\w+)',
+        re.IGNORECASE,
+    )
+    _MONGO_STRING_ONLY_SAFE = re.compile(
+        r"(?:''\s*\+\s*query|\.substr\s*\(|req\.body\s+is\s+safe|only\s+by\s+string\s+value|typeof\s+\w+\s*===\s*['\"]string['\"])",
+        re.IGNORECASE,
+    )
     _SUBPROCESS_LIST    = re.compile(r'subprocess\.(?:run|Popen|call|check_output)\s*\(\s*\[', re.IGNORECASE)
     _EXECFILE_ARRAY     = re.compile(r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', re.IGNORECASE)
     _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
     # Static template: render_template_string('<literal>', keyword=args) — safe with Jinja2 autoescape
     _STATIC_TEMPLATE    = re.compile(r"render_template_string\s*\(\s*['\"]", re.IGNORECASE)
     _HTML_ESCAPE_SAFE   = re.compile(r'\b(?:escape|escapeHtml)\s*\(', re.IGNORECASE)
+    _XSS_ENCODE_SAFE    = re.compile(r'\bencodeURIComponent\s*\(|\.split\s*\(\s*["\']\?["\']\s*\)\s*\[\s*0\s*\]', re.IGNORECASE)
+    _XSS_QUOTE_GUARD_SAFE = re.compile(r'indexOf\s*\(\s*["\']\\?["\']\s*\)\s*!==\s*-1', re.IGNORECASE)
+    _XSS_STATIC_JQUERY_SAFE = re.compile(r'\$\s*\(\s*["\']<[^"\']*["\']\s*\+\s*\$\.trim\s*\(\s*["\']', re.IGNORECASE)
     _TEXT_PLAIN_RESPONSE = re.compile(
         r"res\.set\s*\(\s*['\"]Content-Type['\"]\s*,\s*(?:['\"]text/plain['\"]|textContentType\s*\()",
         re.IGNORECASE,
@@ -448,6 +459,8 @@ class SliceClassifier:
                 or self._PARAMETERIZED_SQL2.search(code)
                 or self._PARAMETERIZED_SQL_BIND.search(code)
                 or self._SQLALCHEMY_ATTR_COMPARE.search(code)
+                or self._JS_QUERY_ARRAY_ARGS.search(code)
+                or self._MONGO_STRING_ONLY_SAFE.search(code)
             ):
                 return True
         if rule_id in ("COMMAND_INJECTION", "CODE_INJECTION"):
@@ -465,6 +478,9 @@ class SliceClassifier:
             if (
                 self._STATIC_TEMPLATE.search(code)
                 or self._HTML_ESCAPE_SAFE.search(code)
+                or self._XSS_ENCODE_SAFE.search(code)
+                or self._XSS_QUOTE_GUARD_SAFE.search(code)
+                or self._XSS_STATIC_JQUERY_SAFE.search(code)
                 or self._TEXT_PLAIN_RESPONSE.search(code)
             ):
                 return True
