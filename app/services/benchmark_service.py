@@ -24,13 +24,15 @@ from app.benchmark.scope import (
     supported_cwes_from_queries,
 )
 from app.schemas.benchmark import (
-    TestCase, TestCaseCreate, BenchmarkRun, CaseResult, CWEMetrics, LeaderboardEntry
+    TestCase, TestCaseCreate, BenchmarkRun, CaseResult, CWEMetrics, LeaderboardEntry,
+    BenchmarkJob,
 )
 
 logger = logging.getLogger(__name__)
 
 TC_COLLECTION  = "benchmark_test_cases"
 RUN_COLLECTION = "benchmark_runs"
+JOB_COLLECTION = "benchmark_jobs"
 CODEQL_ROOTS = ("Security-python", "Security_ javascript")
 
 
@@ -42,6 +44,11 @@ def _doc_to_test_case(doc: dict) -> TestCase:
 def _doc_to_run(doc: dict) -> BenchmarkRun:
     doc["id"] = str(doc.pop("_id"))
     return BenchmarkRun(**doc)
+
+
+def _doc_to_job(doc: dict) -> BenchmarkJob:
+    doc["id"] = str(doc.pop("_id"))
+    return BenchmarkJob(**doc)
 
 
 async def _maybe_await(value):
@@ -139,6 +146,51 @@ class BenchmarkService:
     async def delete_test_case(self, tc_id: str) -> bool:
         result = await _maybe_await(self.db[TC_COLLECTION].delete_one({"_id": ObjectId(tc_id)}))
         return result.deleted_count > 0
+
+    async def create_benchmark_job(self, run_type: str = "codeql-corpus") -> BenchmarkJob:
+        doc = {
+            "status": "queued",
+            "run_type": run_type,
+            "run_id": None,
+            "error": None,
+            "created_at": datetime.now(timezone.utc),
+            "started_at": None,
+            "completed_at": None,
+        }
+        result = await _maybe_await(self.db[JOB_COLLECTION].insert_one(doc))
+        doc["_id"] = result.inserted_id
+        return _doc_to_job(doc)
+
+    async def get_benchmark_job(self, job_id: str) -> Optional[BenchmarkJob]:
+        doc = await _maybe_await(self.db[JOB_COLLECTION].find_one({"_id": ObjectId(job_id)}))
+        return _doc_to_job(doc) if doc else None
+
+    async def mark_benchmark_job_running(self, job_id: str) -> None:
+        await _maybe_await(self.db[JOB_COLLECTION].update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {"status": "running", "started_at": datetime.now(timezone.utc), "error": None}},
+        ))
+
+    async def mark_benchmark_job_completed(self, job_id: str, run_id: str) -> None:
+        await _maybe_await(self.db[JOB_COLLECTION].update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {
+                "status": "completed",
+                "run_id": run_id,
+                "completed_at": datetime.now(timezone.utc),
+                "error": None,
+            }},
+        ))
+
+    async def mark_benchmark_job_failed(self, job_id: str, error: str) -> None:
+        await _maybe_await(self.db[JOB_COLLECTION].update_one(
+            {"_id": ObjectId(job_id)},
+            {"$set": {
+                "status": "failed",
+                "error": error,
+                "completed_at": datetime.now(timezone.utc),
+            }},
+        ))
 
     async def seed_if_empty(self, cases: list[dict]) -> int:
         existing = await _maybe_await(self.db[TC_COLLECTION].count_documents({}))

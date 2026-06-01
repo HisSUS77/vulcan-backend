@@ -17,6 +17,17 @@ class CodeQLBenchmarkRunRequest(APIModel):
     supported_only: bool = True
 
 
+class BenchmarkJob(APIModel):
+    id: Optional[str] = None
+    status: str = "queued"           # "queued" | "running" | "completed" | "failed"
+    run_type: str = "codeql-corpus"
+    run_id: Optional[str] = None
+    error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 class TestCase(APIModel):
     id: Optional[str] = None
     name: str
