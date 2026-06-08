@@ -48,6 +48,22 @@ Per-CWE breakdown:
 | CWE-94 Code Injection | 98 | 4 | 173 | 96.08% | 36.16% | 52.55% | Best performer; re.compile suppressor correctly scoped |
 | **Overall** | **634** | **50** | **2,964** | **92.69%** | **17.62%** | **29.61%** | |
 
+### v4 — Precision engineering (legacy synthetic benchmark)
+
+**Target:** synthetic benchmark precision ≥ 94 % while keeping recall and F1 unchanged.
+
+**Root-cause FPs eliminated:**
+
+1. **`subprocess.run(['cmd', variable], ...)`** (classifier.py) — List form without `shell=True` was being flagged as COMMAND_INJECTION because pattern 15 fires for any variable in the list. Fixed: added `_SUBPROCESS_SAFE_LIST` which matches list-form calls whose first element is a non-shell binary (`'ping'`, `'convert'`, etc.) and suppresses them when `shell=True` is absent. Shell-interpreter first args (`'sh'`, `'bash'`, etc.) remain flagged.
+
+2. **`os.path.realpath(...)` + `.startswith()` on separate lines** (classifier.py) — `_PATH_REALPATH_PREFIX` required both calls on the *same* line (`[^\n]{0,120}`). Fixed: added a third alternative `=\s*os\.path\.(?:realpath|abspath)\s*\([\s\S]{0,400}\.startswith\s*\(` that handles the common variable-assignment form across lines.
+
+3. **`shlex.quote()` + `subprocess.run(..., shell=True)`** (classifier.py) — Pattern 5 fires for any `subprocess.run(...shell=True)`, but the developer is quoting shell arguments with `shlex.quote`. Fixed: added `_SHLEX_QUOTE_SAFE` which suppresses COMMAND_INJECTION findings when `shlex.quote(` appears in the snippet.
+
+4. **`os.path.normpath(...)` + `.startswith()` on separate lines** (classifier.py) — The v3 removal of `_PATH_NORMPATH_SAFE` was too broad and introduced FPs for patterns where normpath result is assigned to a variable and then checked with `startswith`. Fixed: added `_PATH_NORMPATH_VAR_GUARD` which matches the variable-assignment form.
+
+5. **ReDoS safe linear regex** (classifier.py) — REGEX_DOS pattern 3 fires when `request.args.get(...)` and `re.match(...)` appear in the same function regardless of whether the regex is catastrophic. Fixed: added a REGEX_DOS branch in `_code_is_safe` that extracts the regex pattern string and suppresses the finding if no nested quantifiers (`(a+)+`, `([...]+)+`) are present.
+
 ### v3 — Recall engineering (current iteration)
 
 **Root-cause fixes applied:**

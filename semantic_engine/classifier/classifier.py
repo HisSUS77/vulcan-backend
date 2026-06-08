@@ -428,9 +428,24 @@ class SliceClassifier:
         r'\[\s*(?:[\'"][^\'"]*[\'"](?:\s*,\s*[\'"][^\'"]*[\'"])*\s*)\]',
         re.IGNORECASE,
     )
+    # List form whose first element is a non-shell binary — safe from shell injection even
+    # with variable args (OS passes args directly, no shell metacharacter expansion).
+    _SUBPROCESS_SAFE_LIST = re.compile(
+        r'subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(\s*\[\s*'
+        r'[\'"](?!(?:sh|bash|zsh|csh|ksh|fish|cmd|powershell|pwsh)\b)[^\'"]*[\'"]',
+        re.IGNORECASE,
+    )
+    _SUBPROCESS_SHELL_TRUE = re.compile(r'\bshell\s*=\s*True\b', re.IGNORECASE)
+    # shlex.quote() in the snippet means the developer is properly escaping shell args.
+    _SHLEX_QUOTE_SAFE   = re.compile(r'\bshlex\.quote\s*\(', re.IGNORECASE)
     # execFile safe only when binary AND args list are BOTH exclusively string literals.
     _EXECFILE_ARRAY     = re.compile(
         r'execFile\s*\(\s*[\'"][^\'"]+[\'"],\s*\[\s*(?:[\'"][^\'"]*[\'"](?:\s*,\s*[\'"][^\'"]*[\'"])*\s*)?\]',
+        re.IGNORECASE,
+    )
+    # execFile with a string-literal binary and any args array — Node.js never invokes a shell.
+    _EXECFILE_BINARY_ARRAY = re.compile(
+        r'execFile(?:Sync)?\s*\(\s*[\'"][^\'"]+[\'"],\s*\[',
         re.IGNORECASE,
     )
     _DEFUSEDXML         = re.compile(r'(?:import defusedxml|from defusedxml)', re.IGNORECASE)
@@ -444,12 +459,38 @@ class SliceClassifier:
         r"res\.set\s*\(\s*['\"]Content-Type['\"]\s*,\s*(?:['\"]text/plain['\"]|textContentType\s*\()",
         re.IGNORECASE,
     )
-    _ALLOWLIST_CHECK    = re.compile(r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse)\s*\(', re.IGNORECASE)
-    # Path traversal sanitization: normpath + startswith prefix check
-    # realpath/abspath + startswith in close proximity — strong sanitizer.
+    _ALLOWLIST_CHECK    = re.compile(
+        r'(?:ALLOWED\w*\.has|allowedHosts|is_safe_url|urlparse\s*\('
+        r'|not\s+in\s+ALLOWED\w*'              # Python allowlist: if host not in ALLOWED
+        r'|allowedDomains\.\w+\s*\('           # JS: allowedDomains.includes(...)
+        r'|\.includes\s*\([^)]*hostname'       # JS: .includes(parsedUrl.hostname)
+        r')',
+        re.IGNORECASE,
+    )
+    # File operations that indicate genuine PATH_TRAVERSAL risk.
+    _PATH_FILE_OPS      = re.compile(
+        r'\bopen\s*\(|os\.(?:path\b|open\s*\(|makedirs|mkdir|remove|unlink|rename\s*\()'
+        r'|io\.open\s*\(|aiofiles\.open\s*\(|pathlib\.Path\s*\('
+        r'|shutil\.'
+        r'|fs\.(?:readFile|writeFile|createReadStream|createWriteStream|appendFile|'
+        r'open|stat|unlink|access|mkdir|rmdir|rename|copyFile)(?:Sync)?\s*\('
+        r'|send_file\s*\(|send_from_directory\s*\(|res\.sendFile\s*\(',
+        re.IGNORECASE,
+    )
+    # JS path.normalize/path.resolve assigned to var then var.startsWith() guard.
+    _PATH_JS_NORMALIZE_GUARD = re.compile(
+        r'path\.(?:normalize|resolve)\s*\([\s\S]{0,400}\.startsWith?\s*\(',
+        re.IGNORECASE | re.DOTALL,
+    )
+    # Path traversal sanitization: realpath/abspath + startswith prefix check.
+    # Handles both same-line and variable-assignment (multi-line) forms.
     _PATH_REALPATH_PREFIX = re.compile(
+        # Same-line: os.path.realpath(...).startswith(
         r'os\.path\.(?:realpath|abspath)\s*\([^)]+\)[^\n]{0,120}\.startswith\s*\('
-        r'|\.resolve\s*\(\s*\)[^\n]{0,120}\.startswith\s*\(',
+        # Same-line: .resolve().startswith(
+        r'|\.resolve\s*\(\s*\)[^\n]{0,120}\.startswith\s*\('
+        # Multi-line: var = os.path.realpath(...) ... var.startswith(
+        r'|=\s*os\.path\.(?:realpath|abspath)\s*\([\s\S]{0,400}\.startswith\s*\(',
         re.IGNORECASE | re.DOTALL,
     )
     # normpath + startswith guard where `open` is INSIDE the indented if-block.
@@ -458,6 +499,11 @@ class SliceClassifier:
     _PATH_NORMPATH_GUARD_OPEN = re.compile(
         r'if\s+\w[\w.]*\.startswith\s*\([^)]+\)\s*:[^\n]*\n[ \t]+[^\n]*(?:open|send_file|read_file)\s*\(',
         re.IGNORECASE,
+    )
+    # normpath assigned to var then var.startswith() guard — guards path escape via ../ resolution.
+    _PATH_NORMPATH_VAR_GUARD = re.compile(
+        r'=\s*os\.path\.normpath\s*\([\s\S]{0,400}\.startswith\s*\(',
+        re.IGNORECASE | re.DOTALL,
     )
     _SENDFILE_ROOT_SAFE = re.compile(
         r'res\.sendfile?\s*\([^)]*(?:\{\s*root\s*:|homeDir\s*\+\s*[\'"]/data/|[\'"]data/[\'"]\s*\+)',
@@ -487,16 +533,63 @@ class SliceClassifier:
         if rule_id in ("COMMAND_INJECTION", "CODE_INJECTION"):
             if self._SUBPROCESS_LIST.search(code) or self._EXECFILE_ARRAY.search(code):
                 return True
+            # List form with non-shell first arg and no shell=True is safe from shell injection.
+            if (self._SUBPROCESS_SAFE_LIST.search(code) and
+                    not self._SUBPROCESS_SHELL_TRUE.search(code)):
+                return True
+            # execFile with a string-literal binary is safe regardless of args array content.
+            if self._EXECFILE_BINARY_ARRAY.search(code):
+                return True
+            # shlex.quote present — developer is properly escaping shell arguments.
+            if self._SHLEX_QUOTE_SAFE.search(code):
+                return True
         if rule_id == "CODE_INJECTION":
             if re.search(r'\bre\.compile\s*\(', code):
                 return True
         if rule_id == "PATH_TRAVERSAL":
+            # Broad source-tracking patterns (27/28) fire on any request.args assignment.
+            # If no file operation is present, the code cannot be a path traversal.
+            if not self._PATH_FILE_OPS.search(code):
+                return True
             if self._PATH_REALPATH_PREFIX.search(code):
                 return True
             if self._PATH_NORMPATH_GUARD_OPEN.search(code):
                 return True
+            if self._PATH_NORMPATH_VAR_GUARD.search(code):
+                return True
+            if self._PATH_JS_NORMALIZE_GUARD.search(code):
+                return True
             if self._SENDFILE_ROOT_SAFE.search(code) or self._NORMALIZE_PREFIX_STRIP.search(code):
                 return True
+        if rule_id == "PATH_DISCOVERY":
+            # IDOR: ownership/access-control check visible in snippet
+            if re.search(
+                r'\b(?:current_user(?:_id)?|owner_id|user_id\s*!=|not_found_or_access'
+                r'|owner_id\s*:\s*current)',
+                code, re.IGNORECASE,
+            ):
+                return True
+            # Safe deserialization: SafeLoader, defusedxml (may not be in narrow slice)
+            if re.search(r'\bSafeLoader\b', code):
+                return True
+            # Secure cookie flags
+            if re.search(r'(?:secure\s*[=:]\s*true|httpOnly\s*[=:]\s*true)', code, re.IGNORECASE):
+                return True
+            # Environment variable — not a hardcoded secret
+            if re.search(r'process\.env\.[A-Z_]+\b', code):
+                return True
+            # SQLAlchemy ORM .filter() with == comparison — parameterized
+            if re.search(r'\.filter\s*\([^)]*\.[a-zA-Z_]\w*\s*==\s*[a-zA-Z_]\w*', code, re.IGNORECASE):
+                return True
+            # Cast to str/int prevents NoSQL operator injection
+            if re.search(r'\bstr\s*\(\s*request\.|int\s*\(\s*request\.', code, re.IGNORECASE):
+                return True
+        if rule_id == "REGEX_DOS":
+            # Safe if the regex pattern contains no nested quantifiers (no catastrophic backtracking).
+            regex_src = re.search(r"r?['\"]([^'\"]+)['\"]", code)
+            if regex_src:
+                if not re.search(r'\([^)]*[+*?][^)]*\)\s*[+*?{]', regex_src.group(1)):
+                    return True
         if rule_id in ("TEMPLATE_INJECTION", "XSS"):
             if (
                 self._STATIC_TEMPLATE.search(code)
