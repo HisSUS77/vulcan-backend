@@ -564,12 +564,12 @@ class SliceClassifier:
         if rule_id == "PATH_DISCOVERY":
             # IDOR: ownership/access-control check visible in snippet
             if re.search(
-                r'\b(?:current_user(?:_id)?|owner_id|user_id\s*!=|not_found_or_access'
-                r'|owner_id\s*:\s*current)',
+                r'\b(?:current_user(?:_id)?|owner_id|user_id\s*!=|'
+                r'owner_id\s*:\s*current)',
                 code, re.IGNORECASE,
             ):
                 return True
-            # Safe deserialization: SafeLoader, defusedxml (may not be in narrow slice)
+            # Safe deserialization: SafeLoader / defusedxml
             if re.search(r'\bSafeLoader\b', code):
                 return True
             # Secure cookie flags
@@ -584,6 +584,41 @@ class SliceClassifier:
             # Cast to str/int prevents NoSQL operator injection
             if re.search(r'\bstr\s*\(\s*request\.|int\s*\(\s*request\.', code, re.IGNORECASE):
                 return True
+            # Parameterized SQL in snippet — safe from SQL injection
+            if (
+                self._PARAMETERIZED_SQL.search(code)
+                or self._PARAMETERIZED_SQL2.search(code)
+                or self._PARAMETERIZED_SQL_BIND.search(code)
+                or self._JS_QUERY_ARRAY_ARGS.search(code)
+            ):
+                return True
+            # Subprocess/spawn with array args and no shell — safe from command injection
+            if (self._SUBPROCESS_SAFE_LIST.search(code) and
+                    not self._SUBPROCESS_SHELL_TRUE.search(code)):
+                return True
+            if self._EXECFILE_BINARY_ARRAY.search(code):
+                return True
+            # JS spawn with array args is safe (OS passes args directly, no shell)
+            if re.search(r'\.spawn\s*\(\s*[\'"][^\'"]+[\'"],\s*\[', code, re.IGNORECASE):
+                return True
+            # XML: noent:false or resolve-entities:false disables external entity expansion
+            if re.search(r'noent\s*:\s*false|resolve.entities\s*:\s*false', code, re.IGNORECASE):
+                return True
+            # Allowlist or domain-validation check (SSRF/redirect safety)
+            if self._ALLOWLIST_CHECK.search(code):
+                return True
+            # Credentials masked in log — username only, not password
+            if re.search(r'(?:logger|logging)\.\w+\s*\([^)]*\busername\b[^)]*\)', code, re.IGNORECASE):
+                if not re.search(r'(?:logger|logging)\.\w+\s*\([^)]*\bpassword\b', code, re.IGNORECASE):
+                    return True
+            # ReDoS: no nested quantifiers in regex pattern → not catastrophic.
+            # Handles Python r'...' / "..." and JS /.../ literal syntax.
+            regex_src = re.search(r"r?['\"]([^'\"]{4,})['\"]|/([^/\n]{4,})/", code)
+            if regex_src:
+                pattern_str = regex_src.group(1) or regex_src.group(2)
+                if not re.search(r'\([^)]*[+*?][^)]*\)\s*[+*?{]', pattern_str):
+                    if re.search(r're\.\w+\s*\(|RegExp|\.test\s*\(', code, re.IGNORECASE):
+                        return True
         if rule_id == "REGEX_DOS":
             # Safe if the regex pattern contains no nested quantifiers (no catastrophic backtracking).
             regex_src = re.search(r"r?['\"]([^'\"]+)['\"]", code)

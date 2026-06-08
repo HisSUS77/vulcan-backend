@@ -392,6 +392,10 @@ class PathDiscovery:
         snippets.append("")
         for file_path, line_numbers in nodes_by_file.items():
             code = source_code_map.get(file_path, "")
+            # Fallback for single-file analysis where node.file may not match the map key
+            # (e.g. node.file=None but map has {"bench.py": code}).
+            if not code and source_code_map:
+                code = next(iter(source_code_map.values()), "")
             lines = code.split("\n")
             min_line = max(1, min(line_numbers) - 3)
             max_line = min(len(lines), max(line_numbers) + 3)
